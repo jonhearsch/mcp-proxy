@@ -361,7 +361,7 @@ class ResilientMCPProxy:
 
             # Add health check endpoint
             from starlette.requests import Request
-            from starlette.responses import JSONResponse
+            from starlette.responses import JSONResponse, RedirectResponse
 
             @self.proxy.custom_route("/health", methods=["GET"])
             async def health_check(request: Request) -> JSONResponse:
@@ -372,6 +372,22 @@ class ResilientMCPProxy:
                     "version": version_info["full"],
                     "servers": len(self.config.get("mcpServers", {}))
                 })
+
+            # Add redirect handler for MCP path without trailing slash
+            path_prefix = os.getenv("MCP_PATH_PREFIX", "")
+            if path_prefix:
+                redirect_path = f"/{path_prefix}/mcp"
+                target_path = f"/{path_prefix}/mcp/"
+                
+                @self.proxy.custom_route(redirect_path, methods=["GET", "POST", "HEAD", "OPTIONS"])
+                async def mcp_redirect(request: Request):
+                    """Redirect MCP requests without trailing slash to proper endpoint."""
+                    return RedirectResponse(url=target_path, status_code=308)
+            else:
+                @self.proxy.custom_route("/mcp", methods=["GET", "POST", "HEAD", "OPTIONS"])
+                async def mcp_redirect(request: Request):
+                    """Redirect MCP requests without trailing slash to proper endpoint."""
+                    return RedirectResponse(url="/mcp/", status_code=308)
 
             logger.info("✓ MCP proxy created successfully")
             return True
