@@ -16,6 +16,7 @@ Environment Variables:
     MCP_MAX_RETRIES: Maximum config load retries (default: 3)
     MCP_RESTART_DELAY: Initial restart delay in seconds (default: 5)
     MCP_LIVE_RELOAD: Enable live config reloading (default: false)
+    MCP_PATH_PREFIX: Custom path prefix for MCP endpoint (default: none, endpoint at /mcp/)
 """
 
 # Core libraries
@@ -381,8 +382,12 @@ class ResilientMCPProxy:
     def run_server(self):
         """Run the server with error handling"""
         try:
-            logger.info("Starting MCP proxy server on 0.0.0.0:8080...")
-            self.proxy.run(transport="streamable-http", host="0.0.0.0", port=8080)
+            # Get configurable path prefix from environment
+            path_prefix = os.getenv("MCP_PATH_PREFIX", "")
+            mcp_path = f"/{path_prefix}/mcp/" if path_prefix else "/mcp/"
+
+            logger.info(f"Starting MCP proxy server on 0.0.0.0:8080 with path: {mcp_path}")
+            self.proxy.run(transport="streamable-http", host="0.0.0.0", port=8080, path=mcp_path)
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
             self.shutdown_requested = True
@@ -402,9 +407,13 @@ class ResilientMCPProxy:
             monitor_thread = threading.Thread(target=self._monitor_for_reload, daemon=True)
             monitor_thread.start()
 
+            # Get configurable path prefix from environment
+            path_prefix = os.getenv("MCP_PATH_PREFIX", "")
+            mcp_path = f"/{path_prefix}/mcp/" if path_prefix else "/mcp/"
+
             # Run the server normally
-            logger.info("Starting MCP proxy server on 0.0.0.0:8080...")
-            self.proxy.run(transport="streamable-http", host="0.0.0.0", port=8080)
+            logger.info(f"Starting MCP proxy server on 0.0.0.0:8080 with path: {mcp_path}")
+            self.proxy.run(transport="streamable-http", host="0.0.0.0", port=8080, path=mcp_path)
 
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
@@ -537,6 +546,8 @@ def main():
         MCP_MAX_RETRIES: Config load retry attempts (default: 3)
         MCP_RESTART_DELAY: Initial restart delay in seconds (default: 5)
         MCP_LIVE_RELOAD: Enable file watching (default: false)
+        MCP_PATH_PREFIX: Custom path prefix (default: none, creates /mcp/ endpoint)
+                         Example: "3434dc5d-349b-401c-8071-7589df9a0bce" creates /3434dc5d-349b-401c-8071-7589df9a0bce/mcp/
     """
     # Read configuration from environment variables with sensible defaults
     config_path = os.getenv("MCP_CONFIG_PATH", "mcp_config.json")

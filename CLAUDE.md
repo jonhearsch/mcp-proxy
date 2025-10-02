@@ -85,6 +85,9 @@ curl http://localhost:8080/health
 - `MCP_MAX_RETRIES` - Config load retry attempts (default: 3)
 - `MCP_RESTART_DELAY` - Initial restart delay in seconds (default: 5)
 - `MCP_LIVE_RELOAD` - Enable file watching: `true|1|yes` (default: false)
+- `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none)
+  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
+  - Useful for security through obscurity or routing in multi-tenant deployments
 
 ## Versioning
 

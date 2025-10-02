@@ -146,6 +146,12 @@ python proxy_server.py --transport sse
 ## Environment Variables
 
 - `MCP_CONFIG_PATH` - Path to the configuration file (default: `mcp_config.json`)
+- `MCP_MAX_RETRIES` - Maximum config load retries (default: `3`)
+- `MCP_RESTART_DELAY` - Initial restart delay in seconds (default: `5`)
+- `MCP_LIVE_RELOAD` - Enable live config reloading: `true|1|yes` (default: `false`)
+- `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none, creates `/mcp/`)
+  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
+  - Useful for security through obscurity or multi-tenant deployments
 - Any environment variables referenced in your `mcp_config.json` file
 
 ## Health Check
