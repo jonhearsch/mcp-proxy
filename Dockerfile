@@ -46,8 +46,9 @@ USER mcp
 ENV PATH="/home/mcp/.cargo/bin:/home/mcp/.local/bin:$PATH"
 
 # Pre-install MCP server dependencies to avoid startup delays
-RUN npx -y @modelcontextprotocol/server-filesystem --help > /dev/null 2>&1 || true
 RUN npx -y @modelcontextprotocol/server-sequential-thinking --help > /dev/null 2>&1 || true
+RUN npx -y firecrawl-mcp --help > /dev/null 2>&1 || true
 RUN uvx --help mcp-server-time > /dev/null 2>&1 || true
+RUN uvx --help basic-memory > /dev/null 2>&1 || true
 
 CMD ["python", "proxy_server.py"]
