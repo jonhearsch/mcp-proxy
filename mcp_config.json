@@ -1,16 +1,26 @@
 {
   "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
-    },
-    "sequentialthinking": {
+    "thinking": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
     },
     "time": {
       "command": "uvx",
       "args": ["mcp-server-time", "--local-timezone=America/New_York"]
+    },
+    "web-search": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "${API_KEY_FIRECRAWL}"
+      }
+    },
+    "memory": {
+      "command": "uvx",
+      "args": ["basic-memory", "mcp"],
+      "env": {
+        "BASIC_MEMORY_HOME": "/data/obsidian/Jon"
+      }
     }
   }
 }
