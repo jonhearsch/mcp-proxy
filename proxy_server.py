@@ -357,6 +357,21 @@ class ResilientMCPProxy:
             logger.info("Creating MCP proxy...")
             # Create proxy using the loaded configuration dictionary
             self.proxy = FastMCP.as_proxy(self.config, name="MCP Proxy Hub")
+
+            # Add health check endpoint
+            from starlette.requests import Request
+            from starlette.responses import JSONResponse
+
+            @self.proxy.custom_route("/health", methods=["GET"])
+            async def health_check(request: Request) -> JSONResponse:
+                """Health check endpoint for container orchestration."""
+                version_info = get_version_info()
+                return JSONResponse({
+                    "status": "healthy",
+                    "version": version_info["full"],
+                    "servers": len(self.config.get("mcpServers", {}))
+                })
+
             logger.info("✓ MCP proxy created successfully")
             return True
         except Exception as e:

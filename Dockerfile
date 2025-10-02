@@ -14,7 +14,7 @@ RUN useradd -m -u 1000 mcp
 # Install uv for uvx (install for the mcp user)
 USER mcp
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/home/mcp/.cargo/bin:$PATH"
+ENV PATH="/home/mcp/.cargo/bin:/home/mcp/.local/bin:$PATH"
 
 # Switch back to root for setup
 USER root
@@ -39,10 +39,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 EXPOSE 8080
 
 # Set ownership and switch to non-root user
-RUN chown -R mcp:mcp /app /data
+RUN chown -R mcp:mcp /app /data /home/mcp/.local
 USER mcp
 
 # Ensure PATH includes uv for the mcp user
-ENV PATH="/home/mcp/.cargo/bin:$PATH"
+ENV PATH="/home/mcp/.cargo/bin:/home/mcp/.local/bin:$PATH"
 
 CMD ["python", "proxy_server.py"]
