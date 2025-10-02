@@ -5,8 +5,8 @@ This file contains the current version number and is automatically updated
 by the CI/CD pipeline during builds.
 """
 
-__version__ = "1.0.3"
-__build__ = "6d82eed38f61fe793c772a2ce5fa539a491fd7f2"
+__version__ = "1.0.4"
+__build__ = "32d63120636e876975b3353b1a7f6ae345fdfc6c"
 
 def get_version():
     """Get the full version string including build info."""
