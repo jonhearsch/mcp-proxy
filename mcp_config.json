@@ -2,11 +2,15 @@
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "data"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
     },
-    "sqlite": {
+    "sequentialthinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "time": {
       "command": "uvx",
-      "args": ["mcp-server-sqlite", "--db-path", "data/db.sqlite"]
+      "args": ["mcp-server-time", "--local-timezone=America/New_York"]
     }
   }
 }
