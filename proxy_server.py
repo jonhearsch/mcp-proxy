@@ -20,7 +20,11 @@ Environment Variables:
 """
 
 # Core libraries
+
 from fastmcp import FastMCP
+from fastmcp.server.auth import StaticTokenVerifier
+from fastapi import FastAPI
+
 import os
 import sys
 import json
@@ -29,8 +33,12 @@ import time
 import logging
 import threading
 import socket
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any, Dict, List, Union
+
+# JSON schema validation
+import jsonschema
 
 # File watching for live reload
 from watchdog.observers import Observer
@@ -56,6 +64,56 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+def expand_env_vars(value: Any) -> Any:
+    """
+    Recursively expand environment variables in configuration values.
+    
+    Supports ${VAR_NAME} syntax for environment variable substitution.
+    Falls back to empty string if variable is not set.
+    
+    Args:
+        value: Configuration value to expand (can be str, dict, list, or other)
+        
+    Returns:
+        Value with environment variables expanded
+        
+    Examples:
+        "${HOME}/data" -> "/Users/jon/data"
+        {"key": "${API_KEY}"} -> {"key": "actual-api-key-value"}
+        ["${VAR1}", "${VAR2}"] -> ["value1", "value2"]
+    """
+    if isinstance(value, str):
+        # Pattern matches ${VAR_NAME} with optional fallback ${VAR_NAME:-default}
+        def replace_var(match):
+            var_name = match.group(1)
+            default_value = match.group(2) if match.lastindex >= 2 else ""
+            env_value = os.getenv(var_name)
+            
+            if env_value is None:
+                if default_value:
+                    logger.debug(f"Environment variable ${{{var_name}}} not set, using default: {default_value}")
+                    return default_value
+                else:
+                    logger.warning(f"Environment variable ${{{var_name}}} not set, using empty string")
+                    return ""
+            
+            return env_value
+        
+        # Support both ${VAR} and ${VAR:-default} syntax
+        return re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*?)(?::-([^}]*))?\}', replace_var, value)
+    
+    elif isinstance(value, dict):
+        return {key: expand_env_vars(val) for key, val in value.items()}
+    
+    elif isinstance(value, list):
+        return [expand_env_vars(item) for item in value]
+    
+    else:
+        # Return as-is for other types (int, bool, None, etc.)
+        return value
+
 
 class ConfigFileHandler(FileSystemEventHandler):
     """
@@ -161,7 +219,7 @@ class ResilientMCPProxy:
     MCP servers as defined in the configuration file.
     """
 
-    def __init__(self, config_path: str, max_retries: int = 3, restart_delay: int = 5, enable_live_reload: bool = True):
+    def __init__(self, config_path: str, max_retries: int = 3, restart_delay: int = 5, enable_live_reload: bool = True, path_prefix: str = "", host: str = "0.0.0.0", port: int = 8080):
         """
         Initialize the resilient MCP proxy.
 
@@ -170,12 +228,18 @@ class ResilientMCPProxy:
             max_retries: Maximum number of retries for config loading
             restart_delay: Initial delay between restarts (seconds)
             enable_live_reload: Whether to enable live config reloading
+            path_prefix: Optional URL path prefix (e.g., "abc123" creates /abc123/mcp/ endpoints)
+            host: Host address to bind to (default: 0.0.0.0)
+            port: Port number to bind to (default: 8080)
         """
         # Configuration settings
         self.config_path = config_path
         self.max_retries = max_retries
         self.restart_delay = restart_delay
         self.enable_live_reload = enable_live_reload
+        self.path_prefix = f"/{path_prefix.strip('/')}" if path_prefix else ""
+        self.host = host
+        self.port = port
 
         # Runtime state
         self.proxy: Optional[FastMCP] = None
@@ -187,7 +251,7 @@ class ResilientMCPProxy:
         self.file_observer: Optional[Observer] = None
         self.config_handler: Optional[ConfigFileHandler] = None
 
-    def wait_for_port_available(self, host: str = "0.0.0.0", port: int = 8080, timeout: int = 10):
+    def wait_for_port_available(self, timeout: int = 10):
         """
         Wait for a network port to become available.
 
@@ -195,8 +259,6 @@ class ResilientMCPProxy:
         may take time to release the port after termination.
 
         Args:
-            host: Host address to check
-            port: Port number to check
             timeout: Maximum time to wait in seconds
 
         Returns:
@@ -208,15 +270,15 @@ class ResilientMCPProxy:
                 # Attempt to bind to the port to test availability
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    sock.bind((host, port))
-                    logger.info(f"✓ Port {port} is available")
+                    sock.bind((self.host, self.port))
+                    logger.info(f"✓ Port {self.port} is available")
                     return True
             except OSError:
                 # Port still in use, wait a bit more
-                logger.info(f"Port {port} still in use, waiting...")
+                logger.info(f"Port {self.port} still in use, waiting...")
                 time.sleep(0.5)
 
-        logger.warning(f"Port {port} did not become available within {timeout} seconds")
+        logger.warning(f"Port {self.port} did not become available within {timeout} seconds")
         return False
 
     def setup_signal_handlers(self):
@@ -299,28 +361,41 @@ class ResilientMCPProxy:
 
     def load_config_with_retry(self) -> bool:
         """
-        Load and validate the MCP configuration with retry logic.
+        Load and validate the MCP configuration with retry logic, including JSON schema validation.
 
         Implements exponential backoff retry strategy for transient errors
-        while immediately failing for permanent errors like file not found.
+        while immediately failing for permanent errors like file not found or schema validation errors.
 
         Returns:
-            bool: True if config was loaded successfully, False otherwise
+            bool: True if config was loaded and validated successfully, False otherwise
         """
+        # Schema is always in the same directory as this script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        schema_path = os.path.join(script_dir, "mcp_config.schema.json")
+        
+        try:
+            with open(schema_path, "r") as sf:
+                schema = json.load(sf)
+        except Exception as e:
+            logger.error(f"Failed to load config schema from {schema_path}: {e}")
+            return False
+
         for attempt in range(self.max_retries):
             try:
                 logger.info(f"Loading configuration from {self.config_path} (attempt {attempt + 1}/{self.max_retries})")
 
                 # Read and parse JSON configuration
                 with open(self.config_path, 'r') as f:
-                    self.config = json.load(f)
+                    raw_config = json.load(f)
 
-                # Validate basic config structure
-                if not isinstance(self.config, dict) or 'mcpServers' not in self.config:
-                    raise ValueError("Config must contain 'mcpServers' key")
+                # Expand environment variables in the config
+                self.config = expand_env_vars(raw_config)
+
+                # Validate config against schema
+                jsonschema.validate(instance=self.config, schema=schema)
 
                 server_count = len(self.config['mcpServers'])
-                logger.info(f"✓ Successfully loaded configuration with {server_count} servers")
+                logger.info(f"✓ Successfully loaded and validated configuration with {server_count} servers")
                 return True
 
             except FileNotFoundError:
@@ -330,6 +405,9 @@ class ResilientMCPProxy:
             except json.JSONDecodeError as e:
                 # JSON syntax errors are permanent - don't retry
                 logger.error(f"Invalid JSON in config file: {e}")
+                return False
+            except jsonschema.ValidationError as e:
+                logger.error(f"Config schema validation failed: {e.message}")
                 return False
             except Exception as e:
                 # Other errors might be transient - retry with backoff
@@ -346,64 +424,125 @@ class ResilientMCPProxy:
 
     def create_proxy(self) -> bool:
         """
-        Create a FastMCP proxy instance from the loaded configuration.
-
-        Uses FastMCP.as_proxy() to create a proxy that can handle multiple
-        MCP servers as defined in the configuration.
-
-        Returns:
-            bool: True if proxy was created successfully, False otherwise
+        Create a FastAPI root app and mount a FastMCP proxy instance for each configured MCP server.
+        Each server is available at /mcp/{server_name}/
+        Returns True if all proxies created successfully, False otherwise.
         """
         try:
-            logger.info("Creating MCP proxy...")
-            # Create proxy using the loaded configuration dictionary
-            self.proxy = FastMCP.as_proxy(self.config, name="MCP Proxy Hub")
-
-            # Add health check endpoint
+            logger.info("Creating FastAPI root app and per-server FastMCP proxies...")
             from starlette.requests import Request
-            from starlette.responses import JSONResponse, RedirectResponse
+            from starlette.responses import JSONResponse
+            from contextlib import asynccontextmanager
 
-            @self.proxy.custom_route("/health", methods=["GET"])
-            async def health_check(request: Request) -> JSONResponse:
-                """Health check endpoint for container orchestration."""
+            mcp_servers = self.config.get("mcpServers", {})
+            if not mcp_servers:
+                logger.error("No MCP servers configured!")
+                return False
+
+            # Auth: enabled by default unless MCP_DISABLE_AUTH=true
+            disable_auth = os.getenv("MCP_DISABLE_AUTH", "false").lower() in ("true", "1", "yes")
+            auth = None
+            
+            if not disable_auth:
+                token = os.getenv("MCP_BEARER_TOKEN")
+                if not token:
+                    logger.error("=" * 80)
+                    logger.error("SECURITY ERROR: MCP_BEARER_TOKEN environment variable is required!")
+                    logger.error("=" * 80)
+                    logger.error("")
+                    logger.error("Authentication is enabled but no bearer token is configured.")
+                    logger.error("This would expose your MCP servers without authentication.")
+                    logger.error("")
+                    logger.error("To fix this, choose ONE of the following options:")
+                    logger.error("")
+                    logger.error("  Option 1 (RECOMMENDED): Set a secure bearer token")
+                    logger.error("    export MCP_BEARER_TOKEN=$(openssl rand -hex 32)")
+                    logger.error("    OR add to docker-compose.yml:")
+                    logger.error("      environment:")
+                    logger.error("        - MCP_BEARER_TOKEN=your-secure-token-here")
+                    logger.error("")
+                    logger.error("  Option 2 (NOT RECOMMENDED): Disable authentication")
+                    logger.error("    export MCP_DISABLE_AUTH=true")
+                    logger.error("    OR add to docker-compose.yml:")
+                    logger.error("      environment:")
+                    logger.error("        - MCP_DISABLE_AUTH=true")
+                    logger.error("")
+                    logger.error("=" * 80)
+                    return False
+                
+                auth = StaticTokenVerifier(tokens={token: {
+                    "client_id": "mcp-proxy-client",
+                    "scopes": ["*"]
+                }})
+                logger.info("✓ Bearer token authentication enabled")
+            else:
+                logger.warning("⚠️  WARNING: Authentication is DISABLED - server is not protected!")
+
+            # Store MCP apps and their lifespans to combine them
+            mcp_apps = []
+
+            # Mount each MCP server as its own FastMCP instance
+            for name, server_cfg in mcp_servers.items():
+                mount_path = f"{self.path_prefix}/mcp/{name}"
+                logger.info(f"Mounting MCP server '{name}' at {mount_path}/")
+                # Each server gets its own FastMCP proxy
+                single_cfg = {"mcpServers": {name: server_cfg}}
+                mcp_proxy = FastMCP.as_proxy(single_cfg, name=f"MCP Proxy: {name}", auth=auth)
+                # Get the ASGI app from the proxy with path='/' so it uses the mount point as the base
+                mcp_app = mcp_proxy.http_app(path='/')
+                mcp_apps.append((mount_path, mcp_app))
+
+            # Create a combined lifespan that manages all MCP app lifespans
+            @asynccontextmanager
+            async def combined_lifespan(app: FastAPI):
+                # Start all MCP apps
+                async_contexts = []
+                for mount_path, mcp_app in mcp_apps:
+                    if hasattr(mcp_app, 'lifespan') and mcp_app.lifespan:
+                        ctx = mcp_app.lifespan(mcp_app)
+                        async_contexts.append(ctx)
+                        await ctx.__aenter__()
+                
+                yield
+                
+                # Stop all MCP apps in reverse order
+                for ctx in reversed(async_contexts):
+                    await ctx.__aexit__(None, None, None)
+
+            # Create FastAPI app with combined lifespan
+            self.proxy = FastAPI(title="MCP Proxy Hub", lifespan=combined_lifespan)
+
+            # Now mount all the MCP apps
+            for mount_path, mcp_app in mcp_apps:
+                self.proxy.mount(mount_path, mcp_app)
+
+            # Add a health check endpoint at root
+            health_path = f"{self.path_prefix}/health"
+            
+            @self.proxy.get(health_path)
+            async def health_check(request: Request):
                 version_info = get_version_info()
                 return JSONResponse({
                     "status": "healthy",
                     "version": version_info["full"],
-                    "servers": len(self.config.get("mcpServers", {}))
+                    "servers": list(mcp_servers.keys()),
+                    "path_prefix": self.path_prefix if self.path_prefix else None
                 })
 
-            # Add redirect handler for MCP path without trailing slash
-            path_prefix = os.getenv("MCP_PATH_PREFIX", "")
-            if path_prefix:
-                redirect_path = f"/{path_prefix}/mcp"
-                target_path = f"/{path_prefix}/mcp/"
-                
-                @self.proxy.custom_route(redirect_path, methods=["GET", "POST", "HEAD", "OPTIONS"])
-                async def mcp_redirect(request: Request):
-                    """Redirect MCP requests without trailing slash to proper endpoint."""
-                    return RedirectResponse(url=target_path, status_code=308)
-            else:
-                @self.proxy.custom_route("/mcp", methods=["GET", "POST", "HEAD", "OPTIONS"])
-                async def mcp_redirect(request: Request):
-                    """Redirect MCP requests without trailing slash to proper endpoint."""
-                    return RedirectResponse(url="/mcp/", status_code=308)
-
-            logger.info("✓ MCP proxy created successfully")
+            logger.info(f"✓ All MCP servers mounted as sub-apps.")
+            if self.path_prefix:
+                logger.info(f"✓ Path prefix '{self.path_prefix}' applied to all endpoints")
             return True
         except Exception as e:
-            logger.error(f"Failed to create proxy: {e}", exc_info=True)
+            logger.error(f"Failed to create per-server proxies: {e}", exc_info=True)
             return False
 
     def run_server(self):
-        """Run the server with error handling"""
+        """Run the FastAPI root app using uvicorn."""
         try:
-            # Get configurable path prefix from environment
-            path_prefix = os.getenv("MCP_PATH_PREFIX", "")
-            mcp_path = f"/{path_prefix}/mcp/" if path_prefix else "/mcp/"
-
-            logger.info(f"Starting MCP proxy server on 0.0.0.0:8080 with path: {mcp_path}")
-            self.proxy.run(transport="streamable-http", host="0.0.0.0", port=8080, path=mcp_path)
+            import uvicorn
+            logger.info(f"Starting FastAPI root app on {self.host}:{self.port} (all MCP servers at {self.path_prefix or ''}/mcp/{{name}}/)")
+            uvicorn.run(self.proxy, host=self.host, port=self.port, log_level="info")
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
             self.shutdown_requested = True
@@ -412,25 +551,15 @@ class ResilientMCPProxy:
             raise
 
     def run_server_with_reload(self):
-        """Run server with reload support - triggers process exit on config change"""
+        """Run FastAPI root app with reload support - triggers process exit on config change"""
         import time
-
-        # For live reload, we'll use a simple approach:
-        # When config changes, we exit the process and let the restart mechanism handle it
-
         try:
+            import uvicorn
             # Start monitoring in a separate thread
             monitor_thread = threading.Thread(target=self._monitor_for_reload, daemon=True)
             monitor_thread.start()
-
-            # Get configurable path prefix from environment
-            path_prefix = os.getenv("MCP_PATH_PREFIX", "")
-            mcp_path = f"/{path_prefix}/mcp/" if path_prefix else "/mcp/"
-
-            # Run the server normally
-            logger.info(f"Starting MCP proxy server on 0.0.0.0:8080 with path: {mcp_path}")
-            self.proxy.run(transport="streamable-http", host="0.0.0.0", port=8080, path=mcp_path)
-
+            logger.info(f"Starting FastAPI root app on {self.host}:{self.port} (all MCP servers at {self.path_prefix or ''}/mcp/{{name}}/)")
+            uvicorn.run(self.proxy, host=self.host, port=self.port, log_level="info")
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
             self.shutdown_requested = True
@@ -441,111 +570,81 @@ class ResilientMCPProxy:
     def _monitor_for_reload(self):
         """
         Background thread to monitor for configuration reload requests.
-
-        Runs in a separate daemon thread and checks for reload requests
-        from the file watcher. When a reload is requested, triggers a
-        process exit with a special code to indicate reload (not crash).
+        When a reload is requested, set a restart_requested flag and shut down the server gracefully.
         """
         while not self.shutdown_requested:
             if self.reload_requested:
-                logger.info("Config reload detected, triggering process restart...")
-                # Force process exit to ensure clean port release
-                # Exit code 42 is used to distinguish reload from crash
-                os._exit(42)
-            time.sleep(0.5)  # Check every 500ms
+                logger.info("Config reload detected, requesting graceful restart...")
+                self.restart_requested = True
+                # Trigger shutdown of the server (uvicorn)
+                import threading
+                def shutdown():
+                    import sys
+                    import os
+                    import signal
+                    os.kill(os.getpid(), signal.SIGINT)
+                threading.Thread(target=shutdown, daemon=True).start()
+                break
+            time.sleep(0.5)
 
     def run_with_restart(self):
         """
         Main server loop with automatic restart and error recovery.
-
-        This is the primary method that orchestrates the entire server lifecycle:
-        - Sets up signal handlers for graceful shutdown
-        - Implements restart logic with exponential backoff
-        - Handles both crashes and intentional reloads
-        - Manages file watching for live configuration changes
+        Implements graceful reload instead of os._exit().
         """
         self.setup_signal_handlers()
 
-        # Display version information at startup
         version_info = get_version_info()
         logger.info(f"Starting MCP Proxy Server v{version_info['full']}")
         logger.info("Starting resilient MCP proxy...")
 
         restart_count = 0
 
-        # Main server loop - continues until shutdown is requested
         while not self.shutdown_requested:
+            self.restart_requested = False
             try:
-                # Step 1: Load and validate configuration
                 if not self.load_config_with_retry():
                     logger.error("Cannot start without valid configuration")
                     sys.exit(1)
 
-                # Step 2: Create FastMCP proxy instance
                 if not self.create_proxy():
                     logger.error("Cannot start without valid proxy")
                     sys.exit(1)
 
-                # Step 3: Setup file watching for live reload (if enabled)
                 self.setup_file_watcher()
 
-                # Step 4: Reset restart metrics on successful startup
                 if restart_count > 0:
                     logger.info(f"Successfully restarted after {restart_count} attempts")
                 restart_count = 0
 
-                # Step 5: Run the actual server with reload monitoring
                 self.run_server_with_reload()
 
-                # Step 6: Clean up resources
                 self.stop_file_watcher()
 
-                # If we reach here, server stopped gracefully (not crashed)
-                break
-
-            except SystemExit as e:
-                # Handle special exit codes from reload mechanism
-                if e.code == 42:
-                    # Config reload was triggered - restart with new config
-                    logger.info("Config reload triggered, restarting with new configuration...")
-                    self.stop_file_watcher()
-                    restart_count = 0  # Reloads don't count as restart failures
-
-                    # Ensure port is available before restarting
+                # If reload was requested, wait for port and restart
+                if self.restart_requested:
+                    logger.info("Graceful reload requested, restarting with new configuration...")
                     if not self.wait_for_port_available():
                         logger.error("Port did not become available, skipping reload")
                         break
-
-                    continue  # Restart the loop with new config
+                    continue
                 else:
-                    # Normal exit code - shut down gracefully
                     break
 
             except Exception as e:
-                # Handle unexpected crashes
                 restart_count += 1
                 logger.error(f"Server crashed (restart #{restart_count}): {e}", exc_info=True)
-
-                # Check if shutdown was requested during the crash
                 if self.shutdown_requested:
                     logger.info("Shutdown requested, not restarting")
                     break
-
-                # Prevent infinite restart loops
                 if restart_count >= 10:
                     logger.error("Too many restart attempts, giving up")
                     sys.exit(1)
-
-                # Implement exponential backoff for restart delay
                 logger.info(f"Restarting server in {self.restart_delay} seconds...")
                 time.sleep(self.restart_delay)
-
-                # Increase delay for subsequent restarts (max 30 seconds)
                 self.restart_delay = min(self.restart_delay * 1.5, 30)
 
         logger.info("Proxy server shutdown complete")
-
-        # Final cleanup of all resources
         self.stop_file_watcher()
 
 def main():
@@ -569,6 +668,9 @@ def main():
     config_path = os.getenv("MCP_CONFIG_PATH", "mcp_config.json")
     max_retries = int(os.getenv("MCP_MAX_RETRIES", "3"))
     restart_delay = int(os.getenv("MCP_RESTART_DELAY", "5"))
+    path_prefix = os.getenv("MCP_PATH_PREFIX", "")
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "8080"))
 
     # Parse boolean environment variable for live reload
     # Accepts: true, 1, yes (case insensitive)
@@ -579,7 +681,10 @@ def main():
         config_path=config_path,
         max_retries=max_retries,
         restart_delay=restart_delay,
-        enable_live_reload=enable_live_reload
+        enable_live_reload=enable_live_reload,
+        path_prefix=path_prefix,
+        host=host,
+        port=port
     )
 
     # Start the main server loop with all resilience features

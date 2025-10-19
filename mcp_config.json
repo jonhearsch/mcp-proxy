@@ -1,26 +1,37 @@
 {
   "mcpServers": {
+    "obsidian": {
+      "command": "uvx",
+      "args": ["basic-memory@latest", "mcp"],
+      "env": {
+        "BASIC_MEMORY_HOME": "${BASIC_MEMORY_HOME:-/data/obsidian}"
+      }
+    },
+    "nocodb": {
+      "url": "${NOCODB_MCP_URL}",
+      "transport": "http",
+      "headers": {
+        "xc-mcp-token": "${NOCODB_MCP_TOKEN}"
+      }
+    },
     "thinking": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
     },
     "time": {
       "command": "uvx",
-      "args": ["mcp-server-time", "--local-timezone=America/New_York"]
+      "args": ["mcp-server-time"]
     },
-    "web-search": {
+    "search": {
       "command": "npx",
-      "args": ["-y", "firecrawl-mcp"],
+      "args": ["-y", "@kevinwatt/mcp-server-searxng"],
       "env": {
-        "FIRECRAWL_API_KEY": "${API_KEY_FIRECRAWL}"
+        "SEARXNG_INSTANCES": "${SEARXNG_INSTANCES:-http://localhost:8082}"
       }
     },
-    "memory": {
-      "command": "uvx",
-      "args": ["basic-memory", "mcp"],
-      "env": {
-        "BASIC_MEMORY_HOME": "${BASIC_MEMORY_HOME}"
-      }
+    "fetch": {
+      "url": "${FETCH_MCP_URL:-http://localhost:11235/mcp/sse}",
+      "transport": "http"
     }
   }
 }

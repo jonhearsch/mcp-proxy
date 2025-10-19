@@ -1,13 +1,31 @@
-version: '3.8'
+version: "3.8"
 
 services:
   mcp-proxy:
     build: .
     ports:
-      - "8000:8000"
+      - "8543:8080"
     volumes:
-      - ./mcp_config.json:/app/mcp_config.json:ro
-      - ./data:/data
+      - /Users/jon/Documents/_GIT/__claude_code/mcp-proxy/mcp_config.json:/app/mcp_config.json:ro
+      - /Users/jon/Documents/_GIT/__claude_code/mcp-proxy/data:/data
     environment:
+      # REQUIRED: Bearer token for authentication
+      # Generate with: openssl rand -hex 32
+      - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN:-changeme-please-set-a-secure-token}
+
+      # Optional: Configuration
       - MCP_CONFIG_PATH=/app/mcp_config.json
-      - LOG_LEVEL=debug
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+
+      # Optional: URL path prefix (for security through obscurity or multi-tenant)
+      # - MCP_PATH_PREFIX=e9415487-f3b9-4186-ade3-da8586ddf96b
+
+      # Optional: Resilience settings
+      - MCP_LIVE_RELOAD=false
+      - MCP_MAX_RETRIES=3
+      - MCP_RESTART_DELAY=5
+
+      # Optional: Disable auth (NOT RECOMMENDED)
+      # - MCP_DISABLE_AUTH=true
+    restart: unless-stopped

@@ -1,2 +1,5 @@
 fastmcp
+fastapi
+uvicorn[standard]
 watchdog
+jsonschema

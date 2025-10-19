@@ -11,6 +11,7 @@ This document outlines security approaches for protecting the MCP Proxy endpoint
 **Best Practice:** Combine application-layer and network-layer security for defense-in-depth.
 
 ### Recommended Stack
+
 1. **FastMCP OAuth 2.1 or Bearer Token** (Application layer)
 2. **Cloudflare Tunnel with Service Tokens** (Network layer)
 
@@ -41,6 +42,7 @@ proxy = FastMCP.as_proxy(
 ```
 
 **Pros:**
+
 - ✅ Industry standard OAuth 2.1 compliance
 - ✅ User-level authentication and attribution
 - ✅ Fine-grained permissions per user
@@ -50,12 +52,14 @@ proxy = FastMCP.as_proxy(
 - ✅ Token refresh mechanism
 
 **Cons:**
+
 - ❌ Requires OAuth provider setup and configuration
 - ❌ More complex initial implementation
 - ❌ User consent flow required
 - ❌ External dependency on OAuth provider
 
 **Use Cases:**
+
 - Multi-tenant deployments
 - User-facing applications
 - Compliance/audit requirements
@@ -66,6 +70,8 @@ proxy = FastMCP.as_proxy(
 ### Option 2: FastMCP Bearer Token ⭐ Recommended for Quick Start
 
 Simple token-based authentication with multi-tier access control.
+
+**Note:** As of the latest version, `MCP_BEARER_TOKEN` is **REQUIRED** by default. The server will fail to start if not set (unless auth is explicitly disabled with `MCP_DISABLE_AUTH=true`).
 
 ```python
 from fastmcp import FastMCP
@@ -96,8 +102,12 @@ proxy = FastMCP.as_proxy(
 ```
 
 **Environment Variables:**
+
 ```bash
-# Generate secure tokens
+# Generate secure tokens - REQUIRED (unless MCP_DISABLE_AUTH=true)
+MCP_BEARER_TOKEN=$(openssl rand -hex 32)
+
+# For multi-tier access (optional):
 MCP_READ_TOKEN=$(openssl rand -hex 32)
 MCP_WRITE_TOKEN=$(openssl rand -hex 32)
 MCP_ADMIN_TOKEN=$(openssl rand -hex 32)
@@ -105,6 +115,7 @@ JWT_SECRET=$(openssl rand -hex 64)
 ```
 
 **Pros:**
+
 - ✅ Quick to implement
 - ✅ No external dependencies
 - ✅ Multi-tier access control (read/write/admin)
@@ -113,12 +124,14 @@ JWT_SECRET=$(openssl rand -hex 64)
 - ✅ Low operational overhead
 
 **Cons:**
+
 - ❌ Manual token management required
 - ❌ No user attribution
 - ❌ Token rotation is manual process
 - ❌ Shared secrets model
 
 **Use Cases:**
+
 - Internal services
 - Service-to-service communication
 - Development/staging environments
@@ -155,11 +168,13 @@ proxy.add_middleware(
 ```
 
 **Installation:**
+
 ```bash
 pip install permit-fastmcp
 ```
 
 **Pros:**
+
 - ✅ Attribute-based access control (ABAC)
 - ✅ Policy-as-code with version control
 - ✅ Fine-grained per-tool authorization
@@ -168,12 +183,14 @@ pip install permit-fastmcp
 - ✅ ReBAC (relationship-based) support
 
 **Cons:**
+
 - ❌ External service dependency
 - ❌ Additional cost (SaaS)
 - ❌ Learning curve for policy language
 - ❌ Network latency for policy checks
 
 **Use Cases:**
+
 - Complex authorization requirements
 - Dynamic permission models
 - Compliance-heavy environments
@@ -186,6 +203,7 @@ pip install permit-fastmcp
 Zero-trust network access without exposing ports.
 
 **Setup:**
+
 ```bash
 # Install cloudflared
 brew install cloudflare/cloudflare/cloudflared  # macOS
@@ -222,6 +240,7 @@ cloudflared tunnel run mcp-proxy
 ```
 
 **Service Token Authentication:**
+
 ```bash
 # Create service token in Cloudflare dashboard
 # Add to requests:
@@ -231,6 +250,7 @@ curl -H "CF-Access-Client-Id: <client-id>" \
 ```
 
 **Pros:**
+
 - ✅ Zero exposed ports (no inbound firewall rules)
 - ✅ DDoS protection and rate limiting
 - ✅ Service-to-service authentication via tokens
@@ -240,12 +260,14 @@ curl -H "CF-Access-Client-Id: <client-id>" \
 - ✅ Easy certificate management
 
 **Cons:**
+
 - ❌ Network-level only (no per-user auth)
 - ❌ Cloudflare vendor dependency
 - ❌ Doesn't solve MCP-level authorization
 - ❌ Requires DNS control
 
 **Use Cases:**
+
 - Exposing internal services securely
 - DDoS protection requirements
 - Zero-trust network architecture
@@ -266,21 +288,30 @@ import os
 def create_proxy(config):
     """Create MCP proxy with security enabled."""
 
-    # Enable authentication if credentials are provided
+    # Authentication is enabled by default - MCP_BEARER_TOKEN is REQUIRED
+    # Server will fail to start if not set (unless MCP_DISABLE_AUTH=true)
+
     auth = None
-    if os.getenv("MCP_ENABLE_AUTH", "false").lower() in ("true", "1", "yes"):
+    disable_auth = os.getenv("MCP_DISABLE_AUTH", "false").lower() in ("true", "1", "yes")
+
+    if not disable_auth:
+        token = os.getenv("MCP_BEARER_TOKEN")
+        if not token:
+            raise ValueError(
+                "MCP_BEARER_TOKEN is required! "
+                "Generate one with: openssl rand -hex 32 "
+                "Or disable auth with MCP_DISABLE_AUTH=true (not recommended)"
+            )
+
         auth = BearerTokenAuth(
             tokens={
-                os.getenv("MCP_READ_TOKEN", ""): {
-                    "scopes": ["tools:list", "resources:read"]
-                },
-                os.getenv("MCP_WRITE_TOKEN", ""): {
+                token: {
                     "scopes": ["tools:*", "resources:*"]
                 },
             },
             verify_signature=True,
             issuer="mcp-proxy",
-            secret=os.getenv("JWT_SECRET")
+            secret=os.getenv("JWT_SECRET", token)  # Use token as secret if JWT_SECRET not set
         )
 
     proxy = FastMCP.as_proxy(
@@ -295,22 +326,30 @@ def create_proxy(config):
 ### Docker Compose with Security
 
 ```yaml
-version: '3.8'
+version: "3.8"
 
 services:
   mcp-proxy:
     image: ghcr.io/jonhearsch/mcp-proxy:latest
     ports:
-      - "127.0.0.1:8080:8080"  # Only bind to localhost
+      - "127.0.0.1:8080:8080" # Only bind to localhost
     volumes:
       - ./mcp_config.json:/app/mcp_config.json:ro
       - ./data:/data
     environment:
+      # REQUIRED: Bearer token authentication
+      - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN}
+
+      # Optional configuration
       - MCP_CONFIG_PATH=/app/mcp_config.json
-      - MCP_ENABLE_AUTH=true
-      - MCP_READ_TOKEN=${MCP_READ_TOKEN}
-      - MCP_WRITE_TOKEN=${MCP_WRITE_TOKEN}
-      - JWT_SECRET=${JWT_SECRET}
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+
+      # Optional: URL path prefix for security through obscurity
+      # - MCP_PATH_PREFIX=e9415487-f3b9-4186-ade3-da8586ddf96b
+
+      # To disable auth (NOT RECOMMENDED):
+      # - MCP_DISABLE_AUTH=true
     restart: unless-stopped
 
   cloudflared:
@@ -326,19 +365,15 @@ services:
 ### Environment Variables (.env)
 
 ```bash
-# Authentication
-MCP_ENABLE_AUTH=true
-MCP_READ_TOKEN=<generate-with-openssl-rand-hex-32>
-MCP_WRITE_TOKEN=<generate-with-openssl-rand-hex-32>
-JWT_SECRET=<generate-with-openssl-rand-hex-64>
+# REQUIRED: Bearer token for authentication
+# Generate with: openssl rand -hex 32
+MCP_BEARER_TOKEN=<generate-with-openssl-rand-hex-32>
 
-# Cloudflare
+# Cloudflare Tunnel
 CLOUDFLARE_TUNNEL_TOKEN=<from-cloudflare-dashboard>
 
-# Optional: OAuth (if using Option 1)
-OAUTH_CLIENT_ID=<from-provider>
-OAUTH_CLIENT_SECRET=<from-provider>
-OAUTH_PROVIDER=google  # or github, azure, auth0, workos
+# Optional: Disable auth (NOT RECOMMENDED)
+# MCP_DISABLE_AUTH=true
 ```
 
 ---
@@ -346,6 +381,7 @@ OAUTH_PROVIDER=google  # or github, azure, auth0, workos
 ## Security Checklist
 
 ### Application Layer
+
 - [ ] Enable FastMCP authentication (Bearer Token or OAuth)
 - [ ] Use strong, randomly generated tokens (min 32 bytes)
 - [ ] Store secrets in environment variables, not code
@@ -355,6 +391,7 @@ OAUTH_PROVIDER=google  # or github, azure, auth0, workos
 - [ ] Log authentication attempts and failures
 
 ### Network Layer
+
 - [ ] Use Cloudflare Tunnel or VPN for network access
 - [ ] Never expose port 8080 directly to internet (bind to 127.0.0.1)
 - [ ] Enable TLS/HTTPS for all connections
@@ -363,6 +400,7 @@ OAUTH_PROVIDER=google  # or github, azure, auth0, workos
 - [ ] Use service tokens for machine-to-machine auth
 
 ### Configuration
+
 - [ ] Validate config before reload (prevent bad config injection)
 - [ ] Use read-only volume mounts for config files
 - [ ] Implement config schema validation
@@ -370,6 +408,7 @@ OAUTH_PROVIDER=google  # or github, azure, auth0, workos
 - [ ] Separate secrets from configuration
 
 ### Monitoring & Incident Response
+
 - [ ] Enable structured logging with auth events
 - [ ] Monitor failed authentication attempts
 - [ ] Set up alerts for security events (5+ failed auths)
@@ -378,6 +417,7 @@ OAUTH_PROVIDER=google  # or github, azure, auth0, workos
 - [ ] Document incident response procedures
 
 ### Container Security
+
 - [ ] Run as non-root user (already implemented)
 - [ ] Use read-only filesystem where possible
 - [ ] Scan images for vulnerabilities (Trivy, Snyk)
@@ -390,24 +430,28 @@ OAUTH_PROVIDER=google  # or github, azure, auth0, workos
 ## Migration Path
 
 ### Phase 1: Quick Wins (Day 1)
+
 1. Implement FastMCP Bearer Token auth
 2. Bind to 127.0.0.1 only (not 0.0.0.0)
 3. Generate strong tokens with `openssl rand -hex 32`
 4. Store tokens in environment variables
 
 ### Phase 2: Network Security (Week 1)
+
 1. Set up Cloudflare Tunnel
 2. Configure service tokens
 3. Enable rate limiting
 4. Add WAF rules
 
 ### Phase 3: Advanced Auth (Month 1)
+
 1. Migrate to OAuth 2.1 if user-level auth needed
 2. Implement per-tool authorization
 3. Add audit logging
 4. Set up monitoring and alerts
 
 ### Phase 4: Enterprise (Quarter 1)
+
 1. Consider Permit.io for ABAC
 2. Implement role-based access control (RBAC)
 3. Add compliance logging
@@ -441,6 +485,7 @@ Per the MCP specification, production implementations **MUST**:
 ## Support
 
 For security issues or questions:
+
 - Review BACKLOG.md for planned security improvements
 - Check GitHub issues for known security topics
 - Consult MCP specification for protocol requirements

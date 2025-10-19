@@ -28,22 +28,65 @@ docker run -p 8080:8080 \
   ghcr.io/jonhearsch/mcp-proxy:latest
 ```
 
-### Using Docker Compose
+### Using Docker Compose (Security-Enabled Example)
 
 ```yaml
-version: '3.8'
+version: "3.8"
 
 services:
   mcp-proxy:
     image: ghcr.io/jonhearsch/mcp-proxy:latest
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080" # Only bind to localhost for security
     volumes:
       - ./mcp_config.json:/app/mcp_config.json:ro
       - ./data:/data
     environment:
+      # REQUIRED: Set a strong bearer token
+      - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN}
+
+      # Optional configuration
       - MCP_CONFIG_PATH=/app/mcp_config.json
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+
+      # Optional: URL path prefix for additional security
+      # - MCP_PATH_PREFIX=e9415487-f3b9-4186-ade3-da8586ddf96b
+
+      # To disable auth (not recommended):
+      # - MCP_DISABLE_AUTH=true
+    restart: unless-stopped
+
+  # Optional: Cloudflare Tunnel for Zero Trust access
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - mcp-proxy
+    restart: unless-stopped
 ```
+
+### .env Example (Security)
+
+```env
+# REQUIRED: Bearer Token for MCP Proxy
+# Generate with: openssl rand -hex 32
+MCP_BEARER_TOKEN=your-secure-random-token-here
+
+# Optional: Cloudflare Tunnel token for secure remote access
+CLOUDFLARE_TUNNEL_TOKEN=your_cloudflare_tunnel_token_here
+
+# To disable auth (not recommended):
+# MCP_DISABLE_AUTH=true
+```
+
+**Security Recommendations:**
+
+- Always set a strong, random `MCP_BEARER_TOKEN` for production (e.g. `openssl rand -hex 32`).
+- Never expose port 8080 directly to the public internet; use a tunnel or VPN.
+- Use Cloudflare Tunnel or similar for zero-trust remote access.
 
 ## Configuration
 
@@ -71,6 +114,7 @@ Create a `mcp_config.json` file with your MCP servers:
 ## Available Images
 
 Images are automatically built for:
+
 - `linux/amd64` (x86_64)
 - `linux/arm64` (ARM64/Apple Silicon)
 
@@ -145,14 +189,32 @@ python proxy_server.py --transport sse
 
 ## Environment Variables
 
+### Security (Required)
+
+- `MCP_BEARER_TOKEN` - **Required** Bearer token for authentication (unless `MCP_DISABLE_AUTH=true`)
+  - Generate a secure token: `openssl rand -hex 32`
+  - Default: None (server will fail to start if not set)
+- `MCP_DISABLE_AUTH` - Disable authentication (NOT RECOMMENDED): `true|false` (default: `false`)
+
+### Server Configuration
+
 - `MCP_CONFIG_PATH` - Path to the configuration file (default: `mcp_config.json`)
+- `MCP_HOST` - Host address to bind to (default: `0.0.0.0`)
+- `MCP_PORT` - Port number to bind to (default: `8080`)
+- `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none, creates `/mcp/` endpoint)
+  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/` endpoints
+  - Useful for security through obscurity or multi-tenant deployments
+
+### Resilience & Monitoring
+
 - `MCP_MAX_RETRIES` - Maximum config load retries (default: `3`)
 - `MCP_RESTART_DELAY` - Initial restart delay in seconds (default: `5`)
 - `MCP_LIVE_RELOAD` - Enable live config reloading: `true|1|yes` (default: `false`)
-- `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none, creates `/mcp/`)
-  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
-  - Useful for security through obscurity or multi-tenant deployments
-- Any environment variables referenced in your `mcp_config.json` file
+
+### MCP Server Variables
+
+- Any environment variables referenced in your `mcp_config.json` file using `${VAR_NAME}` syntax
+- Supports default values with `${VAR_NAME:-default_value}` syntax
 
 ## Health Check
 
