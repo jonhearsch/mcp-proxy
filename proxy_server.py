@@ -512,11 +512,7 @@ class ResilientMCPProxy:
             # Create FastAPI app with combined lifespan
             self.proxy = FastAPI(title="MCP Proxy Hub", lifespan=combined_lifespan)
 
-            # Now mount all the MCP apps
-            for mount_path, mcp_app in mcp_apps:
-                self.proxy.mount(mount_path, mcp_app)
-
-            # Add a health check endpoint at root
+            # Add a health check endpoint BEFORE mounting sub-apps
             health_path = f"{self.path_prefix}/health"
             
             @self.proxy.get(health_path)
@@ -528,6 +524,10 @@ class ResilientMCPProxy:
                     "servers": list(mcp_servers.keys()),
                     "path_prefix": self.path_prefix if self.path_prefix else None
                 })
+
+            # Now mount all the MCP apps
+            for mount_path, mcp_app in mcp_apps:
+                self.proxy.mount(mount_path, mcp_app)
 
             logger.info(f"✓ All MCP servers mounted as sub-apps.")
             if self.path_prefix:
