@@ -515,22 +515,32 @@ class ResilientMCPProxy:
             # Add a health check endpoint BEFORE mounting sub-apps
             health_path = f"{self.path_prefix}/health" if self.path_prefix else "/health"
             
-            async def health_check(request: Request):
+            async def health_check():
                 version_info = get_version_info()
-                return JSONResponse({
+                return {
                     "status": "healthy",
                     "version": version_info["full"],
                     "servers": list(mcp_servers.keys()),
                     "path_prefix": self.path_prefix if self.path_prefix else None
-                })
+                }
             
-            # Add the route explicitly
-            self.proxy.add_api_route(health_path, health_check, methods=["GET"])
+            # Add the route with higher priority (before mounts)
+            self.proxy.add_api_route(
+                health_path, 
+                health_check, 
+                methods=["GET"],
+                response_model=None,
+                tags=["health"]
+            )
             logger.info(f"✓ Health check endpoint registered at {health_path}")
+            
+            # Log all routes for debugging
+            logger.info(f"Registered routes: {[route.path for route in self.proxy.routes]}")
 
             # Now mount all the MCP apps
             for mount_path, mcp_app in mcp_apps:
                 self.proxy.mount(mount_path, mcp_app)
+                logger.info(f"✓ Mounted {mount_path}")
 
             logger.info(f"✓ All MCP servers mounted as sub-apps.")
             if self.path_prefix:
