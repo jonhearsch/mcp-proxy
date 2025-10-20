@@ -59,6 +59,12 @@ jobs:
             git config --local user.name "GitHub Action"
             git add version.py
             git commit -m "Bump version to $NEW_VERSION [skip ci]" || exit 0
+            
+            # Delete tag if it exists (locally and remotely)
+            git tag -d "v$NEW_VERSION" 2>/dev/null || true
+            git push origin ":refs/tags/v$NEW_VERSION" 2>/dev/null || true
+            
+            # Create and push new tag
             git tag "v$NEW_VERSION"
             git push origin main
             git push origin "v$NEW_VERSION"
