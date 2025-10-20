@@ -30,7 +30,13 @@ services:
       # - MCP_DISABLE_AUTH=true
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://localhost:8080/$${MCP_PATH_PREFIX}/health || curl -f http://localhost:8080/health",
+        ]
       interval: 30s
       timeout: 3s
       retries: 3

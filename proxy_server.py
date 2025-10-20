@@ -509,8 +509,14 @@ class ResilientMCPProxy:
                 for ctx in reversed(async_contexts):
                     await ctx.__aexit__(None, None, None)
 
-            # Create FastAPI app with combined lifespan
-            self.proxy = FastAPI(title="MCP Proxy Hub", lifespan=combined_lifespan)
+            # Create FastAPI app with combined lifespan (disable docs for security)
+            self.proxy = FastAPI(
+                title="MCP Proxy Hub", 
+                lifespan=combined_lifespan,
+                docs_url=None,
+                redoc_url=None,
+                openapi_url=None
+            )
 
             # Add a health check endpoint BEFORE mounting sub-apps
             health_path = f"{self.path_prefix}/health" if self.path_prefix else "/health"
