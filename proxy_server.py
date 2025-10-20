@@ -483,7 +483,8 @@ class ResilientMCPProxy:
 
             # Mount each MCP server as its own FastMCP instance
             for name, server_cfg in mcp_servers.items():
-                mount_path = f"{self.path_prefix}/mcp/{name}"
+                # Mount at /prefix/{server_name}/mcp/
+                mount_path = f"{self.path_prefix}/{name}/mcp"
                 logger.info(f"Mounting MCP server '{name}' at {mount_path}/")
                 # Each server gets its own FastMCP proxy
                 single_cfg = {"mcpServers": {name: server_cfg}}
