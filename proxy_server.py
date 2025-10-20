@@ -513,9 +513,8 @@ class ResilientMCPProxy:
             self.proxy = FastAPI(title="MCP Proxy Hub", lifespan=combined_lifespan)
 
             # Add a health check endpoint BEFORE mounting sub-apps
-            health_path = f"{self.path_prefix}/health"
+            health_path = f"{self.path_prefix}/health" if self.path_prefix else "/health"
             
-            @self.proxy.get(health_path)
             async def health_check(request: Request):
                 version_info = get_version_info()
                 return JSONResponse({
@@ -524,6 +523,10 @@ class ResilientMCPProxy:
                     "servers": list(mcp_servers.keys()),
                     "path_prefix": self.path_prefix if self.path_prefix else None
                 })
+            
+            # Add the route explicitly
+            self.proxy.add_api_route(health_path, health_check, methods=["GET"])
+            logger.info(f"✓ Health check endpoint registered at {health_path}")
 
             # Now mount all the MCP apps
             for mount_path, mcp_app in mcp_apps:
