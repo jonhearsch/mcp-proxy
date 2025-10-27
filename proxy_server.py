@@ -69,19 +69,73 @@ except ImportError:
     def get_version_info():
         return {"full": "unknown"}
 
-# Configure structured logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.StreamHandler(sys.stderr)
-    ]
-)
+# Configure structured logging with environment variable support
+def setup_logging():
+    """
+    Configure structured logging with support for different log levels per logger.
+    
+    Environment Variables:
+        MCP_LOG_LEVEL: Global log level (default: INFO)
+                       Values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+        MCP_LOG_LEVELS: Comma-separated logger-specific levels (default: none)
+                        Format: "logger1:DEBUG,logger2:WARNING,httpx:DEBUG"
+    
+    Examples:
+        MCP_LOG_LEVEL=DEBUG - Enable debug logging globally
+        MCP_LOG_LEVELS="fastmcp:DEBUG,httpx:DEBUG" - Debug only fastmcp and httpx
+        MCP_LOG_LEVEL=INFO MCP_LOG_LEVELS="fastmcp:DEBUG" - Info globally, debug for fastmcp
+    """
+    # Standard log format with fixed-width logger name (15 chars) for alignment
+    log_format = '%(asctime)s - %(name)-15s - %(levelname)s - %(message)s'
+    formatter = logging.Formatter(log_format)
+    
+    # Create handlers for stdout and stderr
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(formatter)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setFormatter(formatter)
+    
+    # Get global log level from environment
+    global_level_str = os.getenv("MCP_LOG_LEVEL", "INFO").upper()
+    try:
+        global_level = getattr(logging, global_level_str)
+    except AttributeError:
+        global_level = logging.INFO
+        print(f"WARNING: Invalid MCP_LOG_LEVEL '{global_level_str}', using INFO", file=sys.stderr)
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(global_level)
+    root_logger.handlers.clear()
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
+    
+    # Configure logger-specific levels
+    logger_levels_str = os.getenv("MCP_LOG_LEVELS", "")
+    if logger_levels_str:
+        for logger_config in logger_levels_str.split(","):
+            logger_config = logger_config.strip()
+            if ":" not in logger_config:
+                continue
+            
+            logger_name, level_str = logger_config.split(":", 1)
+            logger_name = logger_name.strip()
+            level_str = level_str.strip().upper()
+            
+            try:
+                level = getattr(logging, level_str)
+                logger_obj = logging.getLogger(logger_name)
+                logger_obj.setLevel(level)
+            except AttributeError:
+                print(f"WARNING: Invalid log level '{level_str}' for logger '{logger_name}'", file=sys.stderr)
+
+# Run logging setup
+setup_logging()
 logger = logging.getLogger(__name__)
 
-# Enable detailed logging for httpx to see OAuth request details
-logging.getLogger("httpx").setLevel(logging.DEBUG)
+# Configure loggers for common libraries (will be overridden by MCP_LOG_LEVELS if specified)
+logging.getLogger("fastmcp").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.INFO)
 
 # Log .env file loading
 try:

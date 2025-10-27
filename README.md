@@ -1,13 +1,14 @@
-# MCP Proxy Server - Use Claude AI Remotely with Any MCP Server
+# MCP Proxy Server - Use Claude AI & LibreChat Remotely with Any MCP Server
 
-**Stop working from your local machine.** Access your Model Context Protocol (MCP) servers from anywhere using Claude AI - securely aggregate multiple MCP tools through one remote endpoint with OAuth 2.1 authentication.
+**Stop working from your local machine.** Access your Model Context Protocol (MCP) servers from anywhere using Claude AI or LibreChat - securely aggregate multiple MCP tools through one remote endpoint with OAuth 2.1 authentication.
 
-**Use Claude Desktop or Web with remote MCP servers** - filesystem, database, API, and custom tools accessible from any device.
+**Use Claude Desktop, Claude Web, or LibreChat with remote MCP servers** - filesystem, database, API, and custom tools accessible from any device. **Solves LibreChat's Python MCP server compatibility issues.**
 
 ---
 
 ### 🎯 Perfect for:
-- **Remote MCP access** - Use Claude AI tools from anywhere, not just localhost
+- **Remote MCP access** - Use Claude AI or LibreChat tools from anywhere, not just localhost
+- **LibreChat Python MCP servers** - Run `uvx` based servers remotely (LibreChat can't run them locally)
 - **Team collaboration** - Share MCP servers securely across your organization
 - **Cloud deployments** - Host MCP tools on VPS, Docker, Kubernetes, or serverless
 - **Multi-device workflows** - Switch between work laptop, home desktop, and mobile
@@ -15,11 +16,15 @@
 
 ## Why MCP Proxy?
 
-**Problem:** Claude's MCP support only works with servers running on your local machine. You can't access your tools remotely, share with teammates, or use Claude from different devices.
+**Problems:**
+1. Claude's MCP support only works with servers running on your local machine
+2. LibreChat can't run Python-based MCP servers (`uvx` commands fail due to missing Python dependencies)
+3. You can't access your tools remotely, share with teammates, or use from different devices
 
 **Solution:** MCP Proxy is a **remote MCP server gateway** that lets you:
-- ✅ Access Claude AI tools from **anywhere** (not just localhost)
-- ✅ Use Claude Desktop, Claude Web, or any MCP client remotely
+- ✅ Access Claude AI or LibreChat tools from **anywhere** (not just localhost)
+- ✅ **Fix LibreChat Python MCP issues** - Run `uvx` servers remotely, connect via `streamable-http`
+- ✅ Use Claude Desktop, Claude Web, LibreChat, or any MCP client remotely
 - ✅ Deploy MCP servers once, use everywhere
 - ✅ Share tools securely with team members
 - ✅ Aggregate multiple MCP servers into one endpoint
@@ -37,7 +42,8 @@
 - 🚀 **Multi-Server Aggregation** - Combine stdio (uvx, npx), SSE, and HTTP MCP servers
 - 📝 **Claude-Compatible Config** - Same JSON format as Claude Desktop configuration
 - 🔄 **Live Config Reload** - Add/remove servers without restarting
-- ✅ **Claude Connector Compatible** - Works with Claude AI's official MCP Connector API
+- ✅ **Multi-Client Support** - Works with Claude AI, LibreChat, and any MCP-compatible client
+- 💬 **LibreChat Python MCP Fix** - Solves LibreChat's `uvx` Python server compatibility issues
 - 🏥 **Auto-Restart & Health Checks** - Resilient server lifecycle management
 
 ### Security & Control
@@ -172,6 +178,37 @@ Now connect Claude to your remote MCP proxy:
 7. **Done!** - Claude now has access to all your remote MCP tools
 
 **You can now use Claude from any device** - work laptop, home computer, or mobile - all connected to the same remote MCP servers.
+
+---
+
+### LibreChat Integration
+
+**MCP Proxy works seamlessly with LibreChat** using the `streamable-http` transport. This is especially useful because:
+
+- ✅ **Python MCP servers work** - LibreChat has issues with Python-based MCP servers (`uvx` commands fail). MCP Proxy solves this by running Python servers remotely.
+- ✅ **Remote access** - LibreChat can connect to your remote MCP tools without local installation
+- ✅ **OAuth authentication** - Secure user authentication via Auth0/Keycloak/Okta
+
+**Configuration:**
+
+Add to your LibreChat `librechat.yaml`:
+
+```yaml
+mcpServers:
+  your_mcp_proxy:
+    type: streamable-http
+    url: "https://your-domain.com/mcp"
+```
+
+**Note:** You must specify `type: streamable-http` - LibreChat defaults to SSE transport which won't work with MCP Proxy's HTTP transport.
+
+**Benefits vs. local Python MCP servers:**
+- No Python dependencies needed in LibreChat container
+- Centralized MCP server management
+- Works with `uvx` and `npx` based servers
+- OAuth-protected access
+
+---
 
 ## How Remote MCP Access Works
 
@@ -646,6 +683,9 @@ Update MCP server configurations once, all team members get changes instantly (w
 ### 6. **Home Lab Access**
 Run MCP servers on home infrastructure, access remotely via Cloudflare Tunnel - no VPS costs.
 
+### 7. **LibreChat Python MCP Support**
+Bypass LibreChat's Python MCP server limitations - run `uvx` based servers remotely and connect via `streamable-http`.
+
 ---
 
 ## Common Questions (SEO FAQ)
@@ -674,6 +714,12 @@ A: Yes! MCP Proxy supports Auth0, Keycloak, Okta, and any generic OIDC provider.
 **Q: How do I switch from Auth0 to Keycloak/Okta?**
 A: Just update `/data/auth_config.json` with your new provider config. No code changes needed. See [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md) for examples.
 
+**Q: Does this work with LibreChat?**
+A: Yes! Use `type: streamable-http` in your LibreChat config. MCP Proxy solves LibreChat's Python MCP server compatibility issues by running them remotely.
+
+**Q: How do I use Python MCP servers with LibreChat?**
+A: LibreChat can't run Python MCP servers locally (`uvx` fails). Use MCP Proxy to host them remotely, then connect LibreChat via `streamable-http`.
+
 ---
 
 ## Related Resources
@@ -683,6 +729,11 @@ A: Just update `/data/auth_config.json` with your new provider config. No code c
 - [Model Context Protocol (MCP) Specification](https://modelcontextprotocol.io) - Official MCP protocol docs
 - [FastMCP Documentation](https://gofastmcp.com) - Python framework powering this proxy
 - [Claude AI MCP Documentation](https://docs.anthropic.com/claude/docs/model-context-protocol) - How Claude uses MCP
+
+### MCP Client Integration
+- [LibreChat MCP Documentation](https://www.librechat.ai/docs/features/mcp) - Configure LibreChat with MCP Proxy
+- [Claude Desktop](https://claude.ai) - Official Claude AI desktop app with MCP support
+- [Claude Web](https://claude.ai) - Use Claude AI from any browser
 
 ### Provider Setup Guides
 - [Auth0 Documentation](https://auth0.com/docs) - Auth0 setup and configuration
