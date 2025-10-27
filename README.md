@@ -41,6 +41,7 @@
 - 🏥 **Auto-Restart & Health Checks** - Resilient server lifecycle management
 
 ### Security & Control
+- 🔐 **Multiple OAuth Providers** - Auth0, Keycloak, Okta, or any OIDC-compliant provider
 - 👤 **User Identity Tracking** - Know which team member is using which tools
 - 🎫 **Granular Permissions** - Control tool access per user with allow/deny lists
 - 🔐 **Zero-Trust Ready** - Works with network segmentation and access policies
@@ -53,8 +54,10 @@ Get Claude AI working with remote MCP servers in 3 steps:
 ### Prerequisites
 
 - **Docker** (easiest) or **Python 3.10+** (for development)
-- **Auth0 Account** - Free tier at https://auth0.com (handles OAuth authentication)
+- **OAuth Provider** - Auth0 (free), Keycloak, Okta, or any OIDC provider
 - **Public URL** - Domain, VPS IP, or Cloudflare Tunnel (free options below)
+
+> **Note:** This guide uses Auth0 for simplicity. For other providers (Keycloak, Okta, Generic OIDC), see [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md).
 
 ### 1. Auth0 Setup (5 minutes)
 
@@ -665,12 +668,24 @@ A: Yes, both. Any client supporting MCP Connectors API works with MCP Proxy.
 **Q: Can I deploy MCP servers to the cloud?**
 A: Yes, MCP Proxy runs on Docker - deploy to AWS, GCP, DigitalOcean, Railway, Render, or any hosting platform.
 
+**Q: Can I use a different OAuth provider besides Auth0?**
+A: Yes! MCP Proxy supports Auth0, Keycloak, Okta, and any generic OIDC provider. See [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md) for setup guides.
+
+**Q: How do I switch from Auth0 to Keycloak/Okta?**
+A: Just update `/data/auth_config.json` with your new provider config. No code changes needed. See [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md) for examples.
+
 ---
 
 ## Related Resources
 
+### Core Documentation
+- [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md) - **Configure Auth0, Keycloak, Okta, or generic OIDC**
 - [Model Context Protocol (MCP) Specification](https://modelcontextprotocol.io) - Official MCP protocol docs
 - [FastMCP Documentation](https://gofastmcp.com) - Python framework powering this proxy
 - [Claude AI MCP Documentation](https://docs.anthropic.com/claude/docs/model-context-protocol) - How Claude uses MCP
-- [Auth0 Documentation](https://auth0.com/docs) - OAuth provider setup guides
+
+### Provider Setup Guides
+- [Auth0 Documentation](https://auth0.com/docs) - Auth0 setup and configuration
+- [Keycloak Documentation](https://www.keycloak.org/documentation) - Open-source identity platform
+- [Okta Documentation](https://developer.okta.com/docs/) - Enterprise identity setup
 - [Cloudflare Tunnel Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) - Free remote access setup

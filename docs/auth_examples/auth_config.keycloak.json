@@ -1,0 +1,13 @@
+{
+  "provider": "keycloak",
+  "keycloak": {
+    "server_url": "${KEYCLOAK_SERVER_URL}",
+    "realm": "${KEYCLOAK_REALM}",
+    "client_id": "${KEYCLOAK_CLIENT_ID}",
+    "client_secret": "${KEYCLOAK_CLIENT_SECRET}",
+    "authorization_endpoint": "${KEYCLOAK_SERVER_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/auth",
+    "token_endpoint": "${KEYCLOAK_SERVER_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token",
+    "jwks_uri": "${KEYCLOAK_SERVER_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs",
+    "issuer": "${KEYCLOAK_SERVER_URL}/realms/${KEYCLOAK_REALM}"
+  }
+}

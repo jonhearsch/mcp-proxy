@@ -117,93 +117,366 @@ def load_users() -> Dict[str, Any]:
         return {}
 
 
+def load_auth_config() -> Optional[Dict[str, Any]]:
+    """
+    Load authentication configuration from auth_config.json.
+    Supports environment variable expansion in config values.
+
+    Returns:
+        Dict containing provider config, or None if file not found or invalid
+    """
+    auth_config_path = os.getenv("MCP_AUTH_CONFIG_PATH", "/data/auth_config.json")
+    abs_path = os.path.abspath(auth_config_path)
+
+    try:
+        with open(auth_config_path, 'r') as f:
+            raw_config = json.load(f)
+
+        # Expand environment variables in the auth config
+        config = expand_env_vars(raw_config)
+
+        logger.info(f"✓ Loaded auth_config.json from {abs_path}")
+        logger.info(f"  Provider: {config.get('provider', 'unknown')}")
+
+        return config
+
+    except FileNotFoundError:
+        logger.warning(f"auth_config.json not found at {abs_path}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"✗ Invalid JSON in auth_config.json at {abs_path}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"✗ Failed to load auth_config.json: {e}")
+        return None
+
+
 def create_auth_provider() -> Optional[OAuthProxy]:
-    """Create OAuthProxy for Auth0 authentication."""
-    auth_provider = os.getenv("MCP_AUTH_PROVIDER", "").lower()
+    """
+    Create OAuthProxy from auth_config.json or environment variables.
 
-    logger.info(f"Auth provider: {auth_provider if auth_provider else '(not set)'}")
+    Supports multiple OAuth 2.1 providers:
+    - Auth0
+    - Keycloak
+    - Okta
+    - Generic OIDC (any compliant provider)
 
-    if auth_provider != "oauth_proxy":
-        if auth_provider:
-            logger.info(f"OAuth not enabled (MCP_AUTH_PROVIDER={auth_provider}, expected 'oauth_proxy')")
+    Configuration priority:
+    1. auth_config.json (if exists)
+    2. Environment variables (legacy Auth0 support)
+    """
+    auth_provider_type = os.getenv("MCP_AUTH_PROVIDER", "").lower()
+
+    logger.info(f"Auth provider type: {auth_provider_type if auth_provider_type else '(not set)'}")
+
+    if auth_provider_type != "oauth_proxy":
+        if auth_provider_type:
+            logger.info(f"OAuth not enabled (MCP_AUTH_PROVIDER={auth_provider_type}, expected 'oauth_proxy')")
+        return None
+
+    # Get base URL (required for all providers)
+    mcp_base_url = os.getenv("MCP_BASE_URL")
+    if not mcp_base_url:
+        logger.error("✗ MCP_BASE_URL is required for OAuth authentication")
         return None
 
     try:
-        # Load Auth0 configuration
-        auth0_domain = os.getenv("AUTH0_DOMAIN")
-        auth0_audience = os.getenv("AUTH0_AUDIENCE")
-        auth0_client_id = os.getenv("AUTH0_CLIENT_ID")
-        auth0_client_secret = os.getenv("AUTH0_CLIENT_SECRET")
-        mcp_base_url = os.getenv("MCP_BASE_URL")
+        # Try loading from auth_config.json first
+        auth_config = load_auth_config()
 
-        # Log what we found
-        logger.info("Auth0 Configuration:")
-        logger.info(f"  AUTH0_DOMAIN={auth0_domain}")
-        logger.info(f"  AUTH0_AUDIENCE={auth0_audience}")
-        logger.info(f"  AUTH0_CLIENT_ID={'*' * 8 + (auth0_client_id[-8:] if auth0_client_id else 'MISSING')}")
-        logger.info(f"  AUTH0_CLIENT_SECRET={'***REDACTED***' if auth0_client_secret else 'MISSING'}")
-        logger.info(f"  MCP_BASE_URL={mcp_base_url}")
-
-        if not all([auth0_domain, auth0_audience, auth0_client_id, auth0_client_secret, mcp_base_url]):
-            missing = []
-            if not auth0_domain: missing.append("AUTH0_DOMAIN")
-            if not auth0_audience: missing.append("AUTH0_AUDIENCE")
-            if not auth0_client_id: missing.append("AUTH0_CLIENT_ID")
-            if not auth0_client_secret: missing.append("AUTH0_CLIENT_SECRET")
-            if not mcp_base_url: missing.append("MCP_BASE_URL")
-            logger.error(f"✗ Missing required Auth0 configuration: {', '.join(missing)}")
-            return None
-
-        logger.info("✓ All Auth0 environment variables present")
-
-        # Configure JWT token validation using Auth0's JWKS
-        logger.info("Initializing JWTVerifier...")
-        token_verifier = JWTVerifier(
-            jwks_uri=f"https://{auth0_domain}/.well-known/jwks.json",
-            issuer=f"https://{auth0_domain}/",
-            audience=auth0_audience
-        )
-        logger.info(f"✓ JWTVerifier configured")
-        logger.info(f"  JWKS URI: https://{auth0_domain}/.well-known/jwks.json")
-        logger.info(f"  Issuer: https://{auth0_domain}/")
-
-        # Create OAuth Proxy wrapping Auth0
-        logger.info("Creating OAuthProxy...")
-
-        # Log the OAuth flow parameters
-        logger.info("OAuth Flow Configuration:")
-        logger.info(f"  Authorization Endpoint: https://{auth0_domain}/authorize")
-        logger.info(f"  Token Endpoint: https://{auth0_domain}/oauth/token")
-        logger.info(f"  Base URL: {mcp_base_url}")
-        logger.info(f"  Extra Authorize Params: {{'audience': '{auth0_audience}'}}")
-        logger.info(f"  Extra Token Params: {{'audience': '{auth0_audience}'}}")
-        logger.info("  Note: Enable DEBUG level logging to see scope parameters in actual OAuth requests")
-
-        auth = OAuthProxy(
-            upstream_authorization_endpoint=f"https://{auth0_domain}/authorize",
-            upstream_token_endpoint=f"https://{auth0_domain}/oauth/token",
-            upstream_client_id=auth0_client_id,
-            upstream_client_secret=auth0_client_secret,
-            token_verifier=token_verifier,
-            base_url=AnyHttpUrl(mcp_base_url),
-            # Auth0 requires audience parameter for JWT issuance
-            extra_authorize_params={
-                "audience": auth0_audience
-            },
-            extra_token_params={
-                "audience": auth0_audience
-            },
-            # Advertise supported scopes to clients
-            # This helps with DCR compatibility
-            valid_scopes=["openid", "profile", "email"]
-        )
-
-        logger.info("✓ OAuthProxy successfully initialized with Auth0")
-        return auth
+        if auth_config:
+            return _create_from_config(auth_config, mcp_base_url)
+        else:
+            # Fallback to legacy Auth0 environment variables
+            logger.info("No auth_config.json found, checking for legacy Auth0 environment variables...")
+            return _create_auth0_from_env(mcp_base_url)
 
     except Exception as e:
         logger.error(f"✗ Failed to create OAuthProxy: {e}", exc_info=True)
         return None
+
+
+def _create_from_config(auth_config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
+    """Create OAuthProxy from auth_config.json configuration."""
+    provider = auth_config.get("provider", "").lower()
+
+    logger.info(f"Configuring OAuth for provider: {provider}")
+
+    if provider == "auth0":
+        return _create_auth0_provider(auth_config.get("auth0", {}), mcp_base_url)
+    elif provider == "keycloak":
+        return _create_keycloak_provider(auth_config.get("keycloak", {}), mcp_base_url)
+    elif provider == "okta":
+        return _create_okta_provider(auth_config.get("okta", {}), mcp_base_url)
+    elif provider == "generic_oidc" or provider == "oidc":
+        return _create_generic_oidc_provider(auth_config.get("generic_oidc", {}), mcp_base_url)
+    else:
+        logger.error(f"✗ Unsupported provider: {provider}")
+        logger.error("  Supported providers: auth0, keycloak, okta, generic_oidc")
+        return None
+
+
+def _create_auth0_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
+    """Create OAuthProxy for Auth0."""
+    domain = config.get("domain")
+    audience = config.get("audience")
+    client_id = config.get("client_id") or os.getenv("AUTH0_CLIENT_ID")
+    client_secret = config.get("client_secret") or os.getenv("AUTH0_CLIENT_SECRET")
+
+    logger.info("Auth0 Configuration:")
+    logger.info(f"  Domain: {domain}")
+    logger.info(f"  Audience: {audience}")
+    logger.info(f"  Client ID: {'*' * 8 + (client_id[-8:] if client_id else 'MISSING')}")
+    logger.info(f"  Client Secret: {'***REDACTED***' if client_secret else 'MISSING'}")
+    logger.info(f"  Base URL: {mcp_base_url}")
+
+    if not all([domain, audience, client_id, client_secret]):
+        missing = []
+        if not domain: missing.append("domain")
+        if not audience: missing.append("audience")
+        if not client_id: missing.append("client_id")
+        if not client_secret: missing.append("client_secret")
+        logger.error(f"✗ Missing required Auth0 configuration: {', '.join(missing)}")
+        return None
+
+    # Configure JWT token validation using Auth0's JWKS
+    token_verifier = JWTVerifier(
+        jwks_uri=config.get("jwks_uri", f"https://{domain}/.well-known/jwks.json"),
+        issuer=config.get("issuer", f"https://{domain}/"),
+        audience=audience
+    )
+
+    logger.info("✓ JWTVerifier configured")
+    logger.info(f"  JWKS URI: {token_verifier.jwks_uri}")
+    logger.info(f"  Issuer: {token_verifier.issuer}")
+
+    # Auth0 requires audience parameter for JWT issuance
+    auth = OAuthProxy(
+        upstream_authorization_endpoint=config.get("authorization_endpoint", f"https://{domain}/authorize"),
+        upstream_token_endpoint=config.get("token_endpoint", f"https://{domain}/oauth/token"),
+        upstream_client_id=client_id,
+        upstream_client_secret=client_secret,
+        token_verifier=token_verifier,
+        base_url=AnyHttpUrl(mcp_base_url),
+        extra_authorize_params={"audience": audience},
+        extra_token_params={"audience": audience},
+        valid_scopes=["openid", "profile", "email"]
+    )
+
+    logger.info("✓ OAuthProxy successfully initialized with Auth0")
+    return auth
+
+
+def _create_keycloak_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
+    """Create OAuthProxy for Keycloak."""
+    server_url = config.get("server_url")
+    realm = config.get("realm")
+    client_id = config.get("client_id")
+    client_secret = config.get("client_secret")
+
+    logger.info("Keycloak Configuration:")
+    logger.info(f"  Server URL: {server_url}")
+    logger.info(f"  Realm: {realm}")
+    logger.info(f"  Client ID: {client_id}")
+    logger.info(f"  Client Secret: {'***REDACTED***' if client_secret else 'MISSING'}")
+
+    if not all([server_url, realm, client_id, client_secret]):
+        missing = []
+        if not server_url: missing.append("server_url")
+        if not realm: missing.append("realm")
+        if not client_id: missing.append("client_id")
+        if not client_secret: missing.append("client_secret")
+        logger.error(f"✗ Missing required Keycloak configuration: {', '.join(missing)}")
+        return None
+
+    # Build Keycloak endpoints
+    base = f"{server_url}/realms/{realm}"
+    auth_endpoint = config.get("authorization_endpoint", f"{base}/protocol/openid-connect/auth")
+    token_endpoint = config.get("token_endpoint", f"{base}/protocol/openid-connect/token")
+    jwks_uri = config.get("jwks_uri", f"{base}/protocol/openid-connect/certs")
+    issuer = config.get("issuer", base)
+
+    token_verifier = JWTVerifier(
+        jwks_uri=jwks_uri,
+        issuer=issuer,
+        audience=client_id  # Keycloak uses client_id as audience
+    )
+
+    logger.info("✓ JWTVerifier configured")
+    logger.info(f"  JWKS URI: {jwks_uri}")
+    logger.info(f"  Issuer: {issuer}")
+
+    auth = OAuthProxy(
+        upstream_authorization_endpoint=auth_endpoint,
+        upstream_token_endpoint=token_endpoint,
+        upstream_client_id=client_id,
+        upstream_client_secret=client_secret,
+        token_verifier=token_verifier,
+        base_url=AnyHttpUrl(mcp_base_url),
+        extra_authorize_params=config.get("extra_authorize_params", {}),
+        extra_token_params=config.get("extra_token_params", {}),
+        valid_scopes=["openid", "profile", "email"]
+    )
+
+    logger.info("✓ OAuthProxy successfully initialized with Keycloak")
+    return auth
+
+
+def _create_okta_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
+    """Create OAuthProxy for Okta."""
+    domain = config.get("domain")
+    client_id = config.get("client_id")
+    client_secret = config.get("client_secret")
+
+    logger.info("Okta Configuration:")
+    logger.info(f"  Domain: {domain}")
+    logger.info(f"  Client ID: {client_id}")
+    logger.info(f"  Client Secret: {'***REDACTED***' if client_secret else 'MISSING'}")
+
+    if not all([domain, client_id, client_secret]):
+        missing = []
+        if not domain: missing.append("domain")
+        if not client_id: missing.append("client_id")
+        if not client_secret: missing.append("client_secret")
+        logger.error(f"✗ Missing required Okta configuration: {', '.join(missing)}")
+        return None
+
+    # Build Okta endpoints
+    auth_endpoint = config.get("authorization_endpoint", f"https://{domain}/oauth2/v1/authorize")
+    token_endpoint = config.get("token_endpoint", f"https://{domain}/oauth2/v1/token")
+    jwks_uri = config.get("jwks_uri", f"https://{domain}/oauth2/v1/keys")
+    issuer = config.get("issuer", f"https://{domain}")
+    audience = config.get("audience", "api://default")
+
+    token_verifier = JWTVerifier(
+        jwks_uri=jwks_uri,
+        issuer=issuer,
+        audience=audience
+    )
+
+    logger.info("✓ JWTVerifier configured")
+    logger.info(f"  JWKS URI: {jwks_uri}")
+    logger.info(f"  Issuer: {issuer}")
+
+    auth = OAuthProxy(
+        upstream_authorization_endpoint=auth_endpoint,
+        upstream_token_endpoint=token_endpoint,
+        upstream_client_id=client_id,
+        upstream_client_secret=client_secret,
+        token_verifier=token_verifier,
+        base_url=AnyHttpUrl(mcp_base_url),
+        extra_authorize_params=config.get("extra_authorize_params", {}),
+        extra_token_params=config.get("extra_token_params", {}),
+        valid_scopes=["openid", "profile", "email"]
+    )
+
+    logger.info("✓ OAuthProxy successfully initialized with Okta")
+    return auth
+
+
+def _create_generic_oidc_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
+    """Create OAuthProxy for any generic OIDC-compliant provider."""
+    auth_endpoint = config.get("authorization_endpoint")
+    token_endpoint = config.get("token_endpoint")
+    jwks_uri = config.get("jwks_uri")
+    issuer = config.get("issuer")
+    client_id = config.get("client_id")
+    client_secret = config.get("client_secret")
+    audience = config.get("audience", client_id)
+
+    logger.info("Generic OIDC Configuration:")
+    logger.info(f"  Authorization Endpoint: {auth_endpoint}")
+    logger.info(f"  Token Endpoint: {token_endpoint}")
+    logger.info(f"  JWKS URI: {jwks_uri}")
+    logger.info(f"  Issuer: {issuer}")
+    logger.info(f"  Client ID: {client_id}")
+    logger.info(f"  Audience: {audience}")
+
+    if not all([auth_endpoint, token_endpoint, jwks_uri, issuer, client_id, client_secret]):
+        missing = []
+        if not auth_endpoint: missing.append("authorization_endpoint")
+        if not token_endpoint: missing.append("token_endpoint")
+        if not jwks_uri: missing.append("jwks_uri")
+        if not issuer: missing.append("issuer")
+        if not client_id: missing.append("client_id")
+        if not client_secret: missing.append("client_secret")
+        logger.error(f"✗ Missing required OIDC configuration: {', '.join(missing)}")
+        return None
+
+    token_verifier = JWTVerifier(
+        jwks_uri=jwks_uri,
+        issuer=issuer,
+        audience=audience
+    )
+
+    logger.info("✓ JWTVerifier configured")
+
+    auth = OAuthProxy(
+        upstream_authorization_endpoint=auth_endpoint,
+        upstream_token_endpoint=token_endpoint,
+        upstream_client_id=client_id,
+        upstream_client_secret=client_secret,
+        token_verifier=token_verifier,
+        base_url=AnyHttpUrl(mcp_base_url),
+        extra_authorize_params=config.get("extra_authorize_params", {}),
+        extra_token_params=config.get("extra_token_params", {}),
+        valid_scopes=config.get("valid_scopes", ["openid", "profile", "email"])
+    )
+
+    logger.info("✓ OAuthProxy successfully initialized with Generic OIDC")
+    return auth
+
+
+def _create_auth0_from_env(mcp_base_url: str) -> Optional[OAuthProxy]:
+    """Legacy: Create OAuthProxy from Auth0 environment variables."""
+    auth0_domain = os.getenv("AUTH0_DOMAIN")
+    auth0_audience = os.getenv("AUTH0_AUDIENCE")
+    auth0_client_id = os.getenv("AUTH0_CLIENT_ID")
+    auth0_client_secret = os.getenv("AUTH0_CLIENT_SECRET")
+
+    logger.info("Auth0 Configuration (from environment):")
+    logger.info(f"  AUTH0_DOMAIN={auth0_domain}")
+    logger.info(f"  AUTH0_AUDIENCE={auth0_audience}")
+    logger.info(f"  AUTH0_CLIENT_ID={'*' * 8 + (auth0_client_id[-8:] if auth0_client_id else 'MISSING')}")
+    logger.info(f"  AUTH0_CLIENT_SECRET={'***REDACTED***' if auth0_client_secret else 'MISSING'}")
+    logger.info(f"  MCP_BASE_URL={mcp_base_url}")
+
+    if not all([auth0_domain, auth0_audience, auth0_client_id, auth0_client_secret]):
+        missing = []
+        if not auth0_domain: missing.append("AUTH0_DOMAIN")
+        if not auth0_audience: missing.append("AUTH0_AUDIENCE")
+        if not auth0_client_id: missing.append("AUTH0_CLIENT_ID")
+        if not auth0_client_secret: missing.append("AUTH0_CLIENT_SECRET")
+        logger.error(f"✗ Missing required Auth0 configuration: {', '.join(missing)}")
+        return None
+
+    logger.info("✓ All Auth0 environment variables present")
+
+    # Configure JWT token validation using Auth0's JWKS
+    token_verifier = JWTVerifier(
+        jwks_uri=f"https://{auth0_domain}/.well-known/jwks.json",
+        issuer=f"https://{auth0_domain}/",
+        audience=auth0_audience
+    )
+    logger.info(f"✓ JWTVerifier configured")
+    logger.info(f"  JWKS URI: https://{auth0_domain}/.well-known/jwks.json")
+    logger.info(f"  Issuer: https://{auth0_domain}/")
+
+    # Create OAuth Proxy wrapping Auth0
+    auth = OAuthProxy(
+        upstream_authorization_endpoint=f"https://{auth0_domain}/authorize",
+        upstream_token_endpoint=f"https://{auth0_domain}/oauth/token",
+        upstream_client_id=auth0_client_id,
+        upstream_client_secret=auth0_client_secret,
+        token_verifier=token_verifier,
+        base_url=AnyHttpUrl(mcp_base_url),
+        extra_authorize_params={"audience": auth0_audience},
+        extra_token_params={"audience": auth0_audience},
+        valid_scopes=["openid", "profile", "email"]
+    )
+
+    logger.info("✓ OAuthProxy successfully initialized with Auth0 (legacy env vars)")
+    return auth
 
 
 def expand_env_vars(value: Any) -> Any:

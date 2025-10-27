@@ -1,0 +1,15 @@
+{
+  "provider": "generic_oidc",
+  "generic_oidc": {
+    "authorization_endpoint": "${OIDC_AUTHORIZATION_ENDPOINT}",
+    "token_endpoint": "${OIDC_TOKEN_ENDPOINT}",
+    "jwks_uri": "${OIDC_JWKS_URI}",
+    "issuer": "${OIDC_ISSUER}",
+    "client_id": "${OIDC_CLIENT_ID}",
+    "client_secret": "${OIDC_CLIENT_SECRET}",
+    "audience": "${OIDC_AUDIENCE:-${OIDC_CLIENT_ID}}",
+    "extra_authorize_params": {},
+    "extra_token_params": {},
+    "valid_scopes": ["openid", "profile", "email"]
+  }
+}
