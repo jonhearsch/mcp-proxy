@@ -1,0 +1,133 @@
+name: Build Multi-Arch Docker Image
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      new_tag: ${{ steps.version.outputs.new_tag }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Auto-increment version
+        id: version
+        run: |
+          # Read current version
+          CURRENT_VERSION=$(python -c "exec(open('version.py').read()); print(__version__)")
+          echo "Current version: $CURRENT_VERSION"
+
+          # Only auto-increment for pushes to main (not PRs or manual triggers)
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+            # Parse version components
+            IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+
+            # Increment patch version
+            NEW_PATCH=$((patch + 1))
+            NEW_VERSION="${major}.${minor}.${NEW_PATCH}"
+
+            echo "New version: $NEW_VERSION"
+
+            # Update version.py
+            sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" version.py
+            sed -i "s/__build__ = \".*\"/__build__ = \"${{ github.sha }}\"/" version.py
+
+            # Commit version bump
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add version.py
+            git commit -m "Bump version to $NEW_VERSION [skip ci]" || exit 0
+            
+            # Delete tag if it exists (locally and remotely)
+            git tag -d "v$NEW_VERSION" 2>/dev/null || true
+            git push origin ":refs/tags/v$NEW_VERSION" 2>/dev/null || true
+            
+            # Create and push new tag
+            git tag "v$NEW_VERSION"
+            git push origin main
+            git push origin "v$NEW_VERSION"
+
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+          else
+            # For PRs and manual triggers, use current version with commit SHA
+            sed -i "s/__build__ = \".*\"/__build__ = \"${{ github.sha }}\"/" version.py
+            echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "new_tag=" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=v${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}},value=v${{ needs.version.outputs.version }}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}

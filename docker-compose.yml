@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  mcp-proxy:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mcp_config.json:/app/mcp_config.json:ro
+      - ./data:/data
+    environment:
+      # REQUIRED: Bearer token for authentication
+      # Generate with: openssl rand -hex 32
+      - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN:-changeme-please-set-a-secure-token}
+
+      # Optional: Configuration
+      - MCP_CONFIG_PATH=/app/mcp_config.json
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+
+      # Optional: URL path prefix (for security through obscurity or multi-tenant)
+      # - MCP_PATH_PREFIX=e9415487-f3b9-4186-ade3-da8586ddf96b
+
+      # Optional: Resilience settings
+      - MCP_LIVE_RELOAD=false
+      - MCP_MAX_RETRIES=3
+      - MCP_RESTART_DELAY=5
+
+      # Optional: Disable auth (NOT RECOMMENDED)
+      # - MCP_DISABLE_AUTH=true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://localhost:8080/$${MCP_PATH_PREFIX}/health || curl -f http://localhost:8080/health",
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

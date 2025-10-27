@@ -1,0 +1,4 @@
+fastmcp[auth]
+python-dotenv
+watchdog
+jsonschema
