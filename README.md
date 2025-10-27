@@ -1,27 +1,60 @@
-# MCP Proxy Server
+# MCP Proxy Server - Use Claude AI Remotely with Any MCP Server
 
-A production-ready proxy that aggregates multiple Model Context Protocol (MCP) servers through a single unified endpoint with **built-in OAuth 2.1 authentication via Auth0**.
+**Stop working from your local machine.** Access your Model Context Protocol (MCP) servers from anywhere using Claude AI - securely aggregate multiple MCP tools through one remote endpoint with OAuth 2.1 authentication.
 
-**Works seamlessly with Claude Connectors and any MCP client.**
+**Use Claude Desktop or Web with remote MCP servers** - filesystem, database, API, and custom tools accessible from any device.
+
+---
+
+### 🎯 Perfect for:
+- **Remote MCP access** - Use Claude AI tools from anywhere, not just localhost
+- **Team collaboration** - Share MCP servers securely across your organization
+- **Cloud deployments** - Host MCP tools on VPS, Docker, Kubernetes, or serverless
+- **Multi-device workflows** - Switch between work laptop, home desktop, and mobile
+- **Centralized tool management** - One endpoint for all your MCP servers
+
+## Why MCP Proxy?
+
+**Problem:** Claude's MCP support only works with servers running on your local machine. You can't access your tools remotely, share with teammates, or use Claude from different devices.
+
+**Solution:** MCP Proxy is a **remote MCP server gateway** that lets you:
+- ✅ Access Claude AI tools from **anywhere** (not just localhost)
+- ✅ Use Claude Desktop, Claude Web, or any MCP client remotely
+- ✅ Deploy MCP servers once, use everywhere
+- ✅ Share tools securely with team members
+- ✅ Aggregate multiple MCP servers into one endpoint
 
 ## Features
 
-- ✅ **Claude Connector Compatible** - Works out-of-the-box with Claude's MCP Connector API
-- 🔐 **OAuth 2.1 + PKCE** - Secure authentication with Auth0 (or any OAuth 2.1 provider)
-- 👤 **User Identity Tracking** - Know which user is accessing which tools
-- 🚀 **Multi-Server Aggregation** - Combine stdio (uvx, npx), SSE, and Streamable servers into one endpoint
-- 🐳 **Multi-Architecture Docker** - Runs on AMD64 and ARM64 (including Apple Silicon)
-- 📝 **Simple JSON Configuration** - Claude-style MCP configuration format
-- 🔄 **Live Config Reload** - Update servers without restarting
-- 🏥 **Built-in Health Checks** - Automatic monitoring and resilience
-- 🔒 **Zero-Trust Ready** - Works with Cloudflare Tunnel, network segmentation, etc.
+### Remote Access & Deployment
+- 🌐 **Remote MCP Server Access** - Use Claude AI from anywhere, not just your local machine
+- ☁️ **Cloud-Ready** - Deploy to AWS, GCP, Azure, DigitalOcean, Railway, Render, or any VPS
+- 🐳 **Docker Support** - One-line deployment with multi-architecture support (AMD64/ARM64)
+- 🔒 **Secure Remote Access** - Built-in OAuth 2.1 + PKCE authentication via Auth0
+- 🔐 **Cloudflare Tunnel Ready** - Expose securely without public IP or port forwarding
 
-## Quick Start
+### MCP Server Management
+- 🚀 **Multi-Server Aggregation** - Combine stdio (uvx, npx), SSE, and HTTP MCP servers
+- 📝 **Claude-Compatible Config** - Same JSON format as Claude Desktop configuration
+- 🔄 **Live Config Reload** - Add/remove servers without restarting
+- ✅ **Claude Connector Compatible** - Works with Claude AI's official MCP Connector API
+- 🏥 **Auto-Restart & Health Checks** - Resilient server lifecycle management
+
+### Security & Control
+- 👤 **User Identity Tracking** - Know which team member is using which tools
+- 🎫 **Granular Permissions** - Control tool access per user with allow/deny lists
+- 🔐 **Zero-Trust Ready** - Works with network segmentation and access policies
+- 🔒 **Encrypted Tokens** - OAuth tokens encrypted at rest
+
+## Quick Start - Remote MCP in 10 Minutes
+
+Get Claude AI working with remote MCP servers in 3 steps:
 
 ### Prerequisites
 
-- **Docker** (for containerized deployment) or **Python 3.10+** (for local development)
-- **Auth0 Account** (free tier available at https://auth0.com)
+- **Docker** (easiest) or **Python 3.10+** (for development)
+- **Auth0 Account** - Free tier at https://auth0.com (handles OAuth authentication)
+- **Public URL** - Domain, VPS IP, or Cloudflare Tunnel (free options below)
 
 ### 1. Auth0 Setup (5 minutes)
 
@@ -123,48 +156,63 @@ pip install -r requirements.txt
 python proxy_server.py
 ```
 
-### 4. Connect to Claude
+### 4. Connect Claude AI to Your Remote MCP Server
 
-1. Visit https://claude.ai
-2. Go to **Settings** → **MCP Connectors**
-3. Click **+ Add Connection**
-4. Enter your server URL: `https://your-domain.com/mcp`
-5. Click **Connect**
-6. You'll be redirected to Auth0 to log in
-7. Approve the consent screen
-8. Claude will show available tools from all your configured servers
+Now connect Claude to your remote MCP proxy:
 
-## Architecture
+1. **Open Claude** - Visit https://claude.ai or open Claude Desktop
+2. **Go to Settings** → **MCP Connectors**
+3. **Add Connection** - Click **+ Add Connection**
+4. **Enter URL** - Use your remote server: `https://your-domain.com/mcp`
+5. **Authenticate** - Log in via Auth0 (opens in browser)
+6. **Grant Access** - Approve the consent screen
+7. **Done!** - Claude now has access to all your remote MCP tools
+
+**You can now use Claude from any device** - work laptop, home computer, or mobile - all connected to the same remote MCP servers.
+
+## How Remote MCP Access Works
+
+Instead of Claude only talking to localhost MCP servers, it connects to your remote proxy:
 
 ```
-┌─────────────────┐
-│  Claude Desktop │
-│  or Web App     │
-└────────┬────────┘
-         │ OAuth 2.1 + PKCE
-         ↓
-┌─────────────────────────────────┐
-│   MCP Proxy (Your Server)       │
-│  ┌───────────────────────────┐  │
-│  │   OAuthProxy (Auth0)      │  │
-│  │  ✓ DCR Registration       │  │
-│  │  ✓ JWT Token Validation   │  │
-│  │  ✓ User Consent Screen    │  │
-│  └───────────────────────────┘  │
-│           ↓                      │
-│  ┌───────────────────────────┐  │
-│  │ Unified FastMCP Endpoint  │  │
-│  │  - All servers aggregated │  │
-│  │  - Single /mcp/ path      │  │
-│  └───────────────────────────┘  │
-└────┬────────────────────────┬────┘
-     │                        │
-     ↓                        ↓
-┌─────────────┐         ┌──────────────┐
-│  Server 1   │         │  Server 2    │
-│ (Filesystem)│         │   (Time)     │
-└─────────────┘         └──────────────┘
+┌─────────────────────────────┐
+│  Claude AI (Any Device)     │
+│  • Desktop app              │
+│  • Web browser              │
+│  • Mobile (future)          │
+└────────────┬────────────────┘
+             │
+             │ HTTPS + OAuth 2.1
+             │ (Secure Remote Access)
+             ↓
+    ┌─────────────────────────────┐
+    │   🌐 Your Remote Server     │
+    │   (VPS, Cloud, or Home)     │
+    │                             │
+    │  ┌──────────────────────┐   │
+    │  │  MCP Proxy           │   │
+    │  │  • Auth0 OAuth       │   │
+    │  │  • User validation   │   │
+    │  │  • Token encryption  │   │
+    │  └──────────┬───────────┘   │
+    │             │                │
+    │             ↓                │
+    │  ┌──────────────────────┐   │
+    │  │ Aggregated Endpoint  │   │
+    │  │ All tools at /mcp/   │   │
+    │  └──────────┬───────────┘   │
+    └─────────────┼────────────────┘
+                  │
+         ┌────────┴────────┐
+         ↓                 ↓
+    ┌─────────┐      ┌──────────┐
+    │  MCP    │      │   MCP    │
+    │ Server 1│      │ Server 2 │
+    │(Files)  │      │ (DB/API) │
+    └─────────┘      └──────────┘
 ```
+
+**Result:** Use Claude AI from anywhere while your MCP servers run in one central location.
 
 ## Configuration
 
@@ -258,9 +306,38 @@ Auth provider configuration (auto-generated, can be customized):
 | `MCP_MAX_RETRIES` | Config load retries | `3` |
 | `MCP_RESTART_DELAY` | Restart delay (seconds) | `5` |
 
-## Deployment
+## Deployment Options for Remote Access
 
-### Docker Compose Example
+Choose your hosting strategy based on your needs:
+
+### Option 1: Cloud VPS (DigitalOcean, Linode, AWS, etc.)
+
+**Best for:** Production deployments, team use, always-on access
+
+1. Spin up a $5-10/month VPS with Docker
+2. Point a domain to your server IP
+3. Deploy with Docker Compose (see below)
+4. Access from anywhere: `https://mcp.yourdomain.com`
+
+### Option 2: Home Server + Cloudflare Tunnel (Free!)
+
+**Best for:** Personal use, no VPS cost, secure remote access
+
+1. Run MCP Proxy on a Raspberry Pi or home computer
+2. Use Cloudflare Tunnel for free HTTPS access (no port forwarding!)
+3. Access from anywhere without exposing your home IP
+
+See [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup) below.
+
+### Option 3: PaaS (Railway, Render, Fly.io)
+
+**Best for:** Zero DevOps, auto-scaling, simple setup
+
+Deploy with one click to platforms that auto-configure HTTPS and domains.
+
+---
+
+### Docker Compose Example (Works for All Options)
 
 ```yaml
 version: "3.8"
@@ -301,9 +378,15 @@ services:
     restart: unless-stopped
 ```
 
-### Cloudflare Tunnel Setup
+### Cloudflare Tunnel Setup (Free Remote Access!)
 
-For secure remote access without exposing ports directly:
+**Use this for:**
+- Remote access from anywhere without a VPS
+- Exposing your home server securely (no port forwarding)
+- Free HTTPS with automatic SSL certificates
+- Works with Claude AI from any device
+
+**Setup:**
 
 ```bash
 # 1. Install cloudflared
@@ -332,6 +415,8 @@ cloudflared tunnel run mcp-proxy
 ```
 
 Then set `MCP_BASE_URL=https://mcp.your-domain.com` in your `.env`.
+
+**Now Claude can access your MCP servers remotely** - even if they're running on a home Raspberry Pi!
 
 ## Security
 
@@ -538,9 +623,54 @@ Contributions welcome! Please:
 4. Add tests if applicable
 5. Submit a pull request
 
+## Use Cases for Remote MCP Access
+
+### 1. **Remote Work & Travel**
+Access your development tools, databases, and file systems from anywhere using Claude AI - coffee shop, coworking space, or home office.
+
+### 2. **Team Collaboration**
+Share MCP servers across your team. One deployment, multiple users, granular permissions.
+
+### 3. **Multi-Device Workflows**
+Start a conversation on your laptop, continue on desktop, check on mobile - same tools, different devices.
+
+### 4. **Cloud-Native Development**
+Host MCP servers in your cloud environment (AWS, GCP, Azure) and access via Claude from anywhere.
+
+### 5. **Centralized Tool Management**
+Update MCP server configurations once, all team members get changes instantly (with live reload).
+
+### 6. **Home Lab Access**
+Run MCP servers on home infrastructure, access remotely via Cloudflare Tunnel - no VPS costs.
+
+---
+
+## Common Questions (SEO FAQ)
+
+**Q: Can Claude AI access remote MCP servers?**
+A: Yes, using MCP Proxy. Deploy this server to make any MCP server remotely accessible to Claude Desktop or Web.
+
+**Q: How do I use MCP servers from outside localhost?**
+A: MCP Proxy acts as a gateway - deploy it with Docker, point Claude to your remote URL, authenticate via OAuth.
+
+**Q: Can I use Claude AI MCP tools from different computers?**
+A: Yes! Once MCP Proxy is deployed remotely, any device with Claude (desktop/web) can connect using the same URL.
+
+**Q: How do I share MCP servers with my team?**
+A: Deploy MCP Proxy to a remote server, add team members to `users.json`, they authenticate and get access.
+
+**Q: Does this work with Claude Desktop and Claude Web?**
+A: Yes, both. Any client supporting MCP Connectors API works with MCP Proxy.
+
+**Q: Can I deploy MCP servers to the cloud?**
+A: Yes, MCP Proxy runs on Docker - deploy to AWS, GCP, DigitalOcean, Railway, Render, or any hosting platform.
+
+---
+
 ## Related Resources
 
-- [FastMCP Documentation](https://gofastmcp.com) - Official FastMCP docs
-- [MCP Specification](https://modelcontextprotocol.io) - Official MCP spec
-- [Auth0 Documentation](https://auth0.com/docs) - Auth0 guides and references
-- [OAuth 2.1 Specification](https://tools.ietf.org/html/draft-ietf-oauth-v2-1-10) - OAuth standards
+- [Model Context Protocol (MCP) Specification](https://modelcontextprotocol.io) - Official MCP protocol docs
+- [FastMCP Documentation](https://gofastmcp.com) - Python framework powering this proxy
+- [Claude AI MCP Documentation](https://docs.anthropic.com/claude/docs/model-context-protocol) - How Claude uses MCP
+- [Auth0 Documentation](https://auth0.com/docs) - OAuth provider setup guides
+- [Cloudflare Tunnel Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) - Free remote access setup
