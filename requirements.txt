@@ -1,4 +1,4 @@
-fastmcp[auth]
+fastmcp[auth]>=2.13.0.2
 python-dotenv
 watchdog
 jsonschema
