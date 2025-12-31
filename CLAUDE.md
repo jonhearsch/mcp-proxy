@@ -46,7 +46,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 }
 ```
 
-**/data/users.json** - Authorized users whitelist (required for OAuth):
+**/data/users.json** - Authorized users whitelist (**TODO: Not currently enforced**):
 ```json
 {
   "user@example.com": {
@@ -56,6 +56,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   }
 }
 ```
+
+**Note**: User whitelisting is defined but not currently implemented. All users authenticated via OAuth are currently allowed. Access control happens at the OAuth provider level (Auth0/Keycloak/etc). See TODO in `create_proxy()` for planned implementation.
 
 **/data/auth_config.json** - Auth provider configuration (auto-generated):
 ```json
@@ -80,7 +82,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **Config Load** - Configuration loaded with retry logic (`load_config_with_retry()`)
    - Validates JSON schema against `mcp_config.schema.json`
    - Expands environment variables in config
-   - Loads user whitelist from `/data/users.json`
+   - **TODO**: Load and enforce user whitelist from `/data/users.json`
 4. **FastMCP Creation** - Unified FastMCP instance created via `FastMCP.as_proxy(config, auth=auth)`
    - Single endpoint aggregates all configured MCP servers
    - OAuthProxy middleware handles authentication
@@ -206,8 +208,66 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
 - `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none)
   - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
   - Useful for security through obscurity or multi-tenant deployments
+- `MCP_DISABLE_AUTH` - Disable all authentication: `true|1|yes` (default: false, **NOT RECOMMENDED**)
 
-## OAuth 2.1 Authentication (Auth0)
+### API Key Authentication
+
+- `MCP_API_KEYS` - API keys for service accounts (format: `key1:client1,key2:client2`)
+  - Example: `MCP_API_KEYS="sk-prod-abc123:ci-bot,sk-prod-xyz789:monitoring"`
+  - Each key maps to a client_id with full scopes (`["*"]`)
+  - Can be used **alongside OAuth** for hybrid authentication
+- `MCP_API_KEYS_PATH` - Path to API keys JSON file (alternative to env var)
+  - Format: `{"api-key-string": {"client_id": "user", "scopes": ["*"]}}`
+
+## Hybrid Authentication (OAuth + API Keys)
+
+MCP Proxy supports **both OAuth and API keys simultaneously** via `HybridAuthProvider`:
+
+- **OAuth 2.1** - For interactive users (Claude Desktop, web clients)
+- **API Keys** - For service accounts (CI/CD, monitoring, automation)
+
+### Configuration Examples
+
+```bash
+# OAuth only (interactive users)
+export MCP_AUTH_PROVIDER=oauth_proxy
+export AUTH0_DOMAIN=your-tenant.us.auth0.com
+export AUTH0_CLIENT_ID=your-client-id
+export AUTH0_CLIENT_SECRET=your-client-secret
+export AUTH0_AUDIENCE=your-api-audience
+
+# API keys only (service accounts)
+export MCP_API_KEYS="sk-prod-abc123:ci-bot,sk-prod-xyz789:monitoring"
+
+# Both (recommended for production)
+export MCP_AUTH_PROVIDER=oauth_proxy
+export AUTH0_DOMAIN=your-tenant.us.auth0.com
+export AUTH0_CLIENT_ID=your-client-id
+export AUTH0_CLIENT_SECRET=your-client-secret
+export AUTH0_AUDIENCE=your-api-audience
+export MCP_API_KEYS="sk-prod-abc123:ci-bot"
+```
+
+### Authentication Flow
+
+When a request arrives with `Authorization: Bearer <token>`:
+
+1. **OAuth Validation** - Tries to validate as OAuth JWT token first
+   - Uses JWTVerifier with Auth0 JWKS endpoint
+   - Validates issuer, audience, signature, expiry
+2. **API Key Fallback** - If OAuth fails, tries static API key validation
+   - Uses StaticTokenVerifier with configured keys
+   - Returns client_id and scopes for the key
+3. **Rejection** - If both fail, returns 401 Unauthorized
+
+### Use Cases
+
+- **Interactive users** → OAuth (full auth flow with consent)
+- **CI/CD pipelines** → API keys (no browser needed)
+- **Monitoring services** → API keys (long-lived credentials)
+- **Admin scripts** → API keys (programmatic access)
+
+## OAuth 2.1 Authentication
 
 ### Overview
 
@@ -223,7 +283,8 @@ MCP Proxy uses FastMCP's `OAuthProxy` to wrap Auth0 and provide secure authentic
 
 - **PKCE (Proof Key for Code Exchange)** - End-to-end forwarding prevents token interception
 - **JWT Validation** - Tokens validated via Auth0 JWKS endpoint (public key pinning)
-- **User Whitelist** - Only users in `/data/users.json` can access tools
+- **User Whitelist** - **TODO**: Planned feature to restrict access to users in `/data/users.json`
+  - Currently, access control happens at OAuth provider level (Auth0/Keycloak user management)
 - **Consent Screen** - Explicit user approval before client gains access
 - **Encrypted Storage** - OAuth tokens encrypted at rest using Fernet encryption
 - **Token Expiry** - FastMCP tokens expire when upstream Auth0 tokens expire

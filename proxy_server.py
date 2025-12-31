@@ -10,6 +10,7 @@ through a single FastMCP endpoint. It includes features like:
 - File system monitoring for config changes
 - Retry logic with exponential backoff
 - Port availability checking
+- Hybrid authentication (OAuth + API keys)
 
 Environment Variables:
     MCP_CONFIG_PATH: Path to configuration file (default: mcp_config.json)
@@ -17,13 +18,17 @@ Environment Variables:
     MCP_RESTART_DELAY: Initial restart delay in seconds (default: 5)
     MCP_LIVE_RELOAD: Enable live config reloading (default: false)
     MCP_PATH_PREFIX: Custom path prefix for MCP endpoint (default: none, endpoint at /mcp/)
+    MCP_AUTH_PROVIDER: Auth provider type (set to 'oauth_proxy' for OAuth)
+    MCP_API_KEYS: API keys for service accounts (format: "key1:client1,key2:client2")
+    MCP_API_KEYS_PATH: Path to API keys JSON file (alternative to MCP_API_KEYS)
+    MCP_DISABLE_AUTH: Disable authentication (NOT RECOMMENDED, default: false)
 """
 
 # Core libraries
 
 from fastmcp import FastMCP
-from fastmcp.server.auth import OAuthProxy
-from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.server.auth import OAuthProxy, AccessToken, TokenVerifier
+from fastmcp.server.auth.providers.jwt import JWTVerifier, StaticTokenVerifier
 from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 
@@ -151,7 +156,15 @@ except ImportError:
 
 
 def load_users() -> Dict[str, Any]:
-    """Load authorized users from users.json."""
+    """
+    Load authorized users from users.json.
+
+    TODO: This function is defined but not currently enforced!
+    User whitelisting needs to be implemented in HybridAuthProvider.verify_token()
+    to check if the authenticated user's email/client_id is in the allowed users list.
+
+    For now, access control happens at the OAuth provider level (Auth0/Keycloak).
+    """
     users_path = os.getenv("MCP_USERS_PATH", "/data/users.json")
     abs_path = os.path.abspath(users_path)
     try:
@@ -533,6 +546,158 @@ def _create_auth0_from_env(mcp_base_url: str) -> Optional[OAuthProxy]:
     return auth
 
 
+class HybridAuthProvider(OAuthProxy):
+    """
+    Hybrid authentication provider supporting both OAuth 2.1 and API keys.
+
+    This provider extends OAuthProxy to add API key fallback authentication.
+    When both OAuth and API keys are configured, it:
+    1. Provides full OAuth 2.1 endpoints (DCR, authorize, token, etc.)
+    2. Falls back to API key validation if OAuth token verification fails
+
+    This allows:
+    - OAuth 2.1 (via OAuthProxy) for interactive users
+    - Static API keys (via StaticTokenVerifier) for service accounts and automation
+
+    Authentication is attempted in order:
+    1. OAuth JWT token validation (if OAuth configured)
+    2. Static API key validation (if API keys configured)
+
+    Usage:
+        Configure via environment variables:
+        - MCP_AUTH_PROVIDER=oauth_proxy (enables OAuth)
+        - MCP_API_KEYS="key1:client1,key2:client2" (enables API keys)
+
+        Both can be enabled simultaneously for maximum flexibility.
+    """
+
+    def __init__(self, oauth_proxy: OAuthProxy, api_keys: Optional[Dict[str, Dict[str, Any]]]):
+        """
+        Initialize hybrid authentication provider.
+
+        Args:
+            oauth_proxy: OAuthProxy instance for OAuth 2.1 authentication (required)
+            api_keys: Optional dict mapping API key strings to their claims
+                     Format: {"api-key-string": {"client_id": "user", "scopes": ["*"]}}
+        """
+        # Copy all attributes from the OAuthProxy instance
+        self.__dict__.update(oauth_proxy.__dict__)
+
+        # Store reference to OAuth proxy for verify_token delegation
+        self._oauth_proxy = oauth_proxy
+
+        # Create API key verifier if keys provided
+        self.api_key_verifier = None
+        if api_keys:
+            self.api_key_verifier = StaticTokenVerifier(
+                tokens=api_keys,
+                required_scopes=None
+            )
+            logger.info(f"✓ API key authentication enabled ({len(api_keys)} keys configured)")
+
+    async def verify_token(self, token: str) -> Optional[AccessToken]:
+        """
+        Verify authentication token using OAuth or API key validation.
+
+        Args:
+            token: Bearer token from Authorization header
+
+        Returns:
+            AccessToken with claims if valid, None otherwise
+        """
+        # Try OAuth JWT validation first using the parent OAuthProxy
+        try:
+            result = await self._oauth_proxy.verify_token(token)
+            if result:
+                logger.debug(f"Token verified via OAuth for client: {result.client_id}")
+
+                # TODO: Implement user whitelist check here
+                # Load users.json and verify result.client_id (or custom claim for email)
+                # is in the allowed users list. If not, return None to reject the token.
+                # Example:
+                # allowed_users = load_users()
+                # if result.client_id not in allowed_users:
+                #     logger.warning(f"User {result.client_id} not in whitelist")
+                #     return None
+
+                return result
+        except Exception as e:
+            logger.debug(f"OAuth token verification failed: {e}")
+
+        # Fall back to API key validation
+        if self.api_key_verifier:
+            try:
+                result = await self.api_key_verifier.verify_token(token)
+                if result:
+                    logger.debug(f"Token verified via API key for client: {result.client_id}")
+
+                    # TODO: Optionally check API key client_id against whitelist as well
+
+                    return result
+            except Exception as e:
+                logger.debug(f"API key verification failed: {e}")
+
+        logger.debug("Token verification failed for all methods")
+        return None
+
+
+def load_api_keys() -> Optional[Dict[str, Dict[str, Any]]]:
+    """
+    Load API keys from environment variable or JSON file.
+
+    Supports two formats:
+    1. Environment variable (MCP_API_KEYS): "key1:client1,key2:client2"
+    2. JSON file (MCP_API_KEYS_PATH): {"key1": {"client_id": "client1", "scopes": ["*"]}}
+
+    Returns:
+        Dict mapping API key strings to their claims, or None if not configured
+    """
+    # Try environment variable first
+    api_keys_str = os.getenv("MCP_API_KEYS")
+    if api_keys_str:
+        api_keys = {}
+        try:
+            for entry in api_keys_str.split(","):
+                entry = entry.strip()
+                if ":" not in entry:
+                    logger.warning(f"Invalid API key entry format (missing ':'): {entry}")
+                    continue
+
+                key, client_id = entry.split(":", 1)
+                api_keys[key.strip()] = {
+                    "client_id": client_id.strip(),
+                    "scopes": ["*"]
+                }
+
+            if api_keys:
+                logger.info(f"✓ Loaded {len(api_keys)} API keys from MCP_API_KEYS")
+                logger.info(f"  Clients: {', '.join([v['client_id'] for v in api_keys.values()])}")
+                return api_keys
+        except Exception as e:
+            logger.error(f"Failed to parse MCP_API_KEYS: {e}")
+            return None
+
+    # Try JSON file
+    api_keys_path = os.getenv("MCP_API_KEYS_PATH")
+    if api_keys_path:
+        abs_path = os.path.abspath(api_keys_path)
+        try:
+            with open(api_keys_path, 'r') as f:
+                api_keys = json.load(f)
+
+            logger.info(f"✓ Loaded {len(api_keys)} API keys from {abs_path}")
+            logger.info(f"  Clients: {', '.join([v.get('client_id', 'unknown') for v in api_keys.values()])}")
+            return api_keys
+        except FileNotFoundError:
+            logger.warning(f"API keys file not found at {abs_path}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in API keys file at {abs_path}: {e}")
+            return None
+
+    return None
+
+
 def expand_env_vars(value: Any) -> Any:
     """
     Recursively expand environment variables in configuration values.
@@ -906,18 +1071,38 @@ class ResilientMCPProxy:
                 logger.error("No MCP servers configured!")
                 return False
 
-            # Create OAuthProxy or return None if not configured
-            auth = create_auth_provider()
+            # Create OAuthProxy (or None if not configured)
+            oauth_provider = create_auth_provider()
 
-            # If OAuth not configured, check for bearer token (legacy support)
-            if auth is None:
+            # Load API keys (or None if not configured)
+            api_keys = load_api_keys()
+
+            # Create auth provider based on configuration
+            auth = None
+            if oauth_provider and api_keys:
+                # Both OAuth and API keys configured - use hybrid
+                auth = HybridAuthProvider(oauth_provider, api_keys)
+                logger.info("✓ Hybrid authentication enabled")
+                logger.info("  - OAuth 2.1 authentication: enabled")
+                logger.info("  - API key authentication: enabled")
+            elif oauth_provider:
+                # OAuth only
+                auth = oauth_provider
+                logger.info("✓ OAuth 2.1 authentication enabled")
+            elif api_keys:
+                # API keys only
+                auth = StaticTokenVerifier(tokens=api_keys, required_scopes=None)
+                logger.info("✓ API key authentication enabled")
+                logger.info(f"  - {len(api_keys)} API keys configured")
+            else:
+                # No authentication configured
                 disable_auth = os.getenv("MCP_DISABLE_AUTH", "false").lower() in ("true", "1", "yes")
 
                 if not disable_auth:
                     logger.error("Authentication is required but not properly configured.")
                     logger.error("Set either:")
-                    logger.error("  - MCP_AUTH_PROVIDER=oauth_proxy with Auth0 credentials")
-                    logger.error("  - MCP_BEARER_TOKEN for legacy bearer token auth")
+                    logger.error("  - MCP_AUTH_PROVIDER=oauth_proxy with OAuth credentials")
+                    logger.error("  - MCP_API_KEYS=key1:client1,key2:client2 for API key auth")
                     logger.error("  - MCP_DISABLE_AUTH=true to disable (NOT RECOMMENDED)")
                     return False
                 else:
@@ -955,9 +1140,6 @@ class ResilientMCPProxy:
                 logger.info(f"✓ Created unified FastMCP proxy with {server_count} server(s)")
                 logger.info(f"  Servers: {server_names}")
                 logger.info(f"  Endpoints: /mcp/ (MCP), /health (health check)")
-
-                if auth:
-                    logger.info("✓ OAuthProxy authentication enabled")
 
                 return True
 
