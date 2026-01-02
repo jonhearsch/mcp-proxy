@@ -552,7 +552,7 @@ class HybridAuthProvider(OAuthProxy):
     """
     Hybrid authentication provider supporting both OAuth 2.1 and API keys.
 
-    This provider extends OAuthProxy to add API key fallback authentication.
+    This provider wraps OAuthProxy to add API key fallback authentication.
     When both OAuth and API keys are configured, it:
     1. Provides full OAuth 2.1 endpoints (DCR, authorize, token, etc.)
     2. Falls back to API key validation if OAuth token verification fails
@@ -582,10 +582,7 @@ class HybridAuthProvider(OAuthProxy):
             api_keys: Optional dict mapping API key strings to their claims
                      Format: {"api-key-string": {"client_id": "user", "scopes": ["*"]}}
         """
-        # Copy all attributes from the OAuthProxy instance
-        self.__dict__.update(oauth_proxy.__dict__)
-
-        # Store reference to OAuth proxy for verify_token delegation
+        # Store reference to OAuth proxy - use it directly, don't copy
         self._oauth_proxy = oauth_proxy
 
         # Create API key verifier if keys provided
@@ -597,6 +594,10 @@ class HybridAuthProvider(OAuthProxy):
             )
             logger.info(f"✓ API key authentication enabled ({len(api_keys)} keys configured)")
 
+    def __getattr__(self, name):
+        """Delegate all attribute access to the underlying OAuthProxy."""
+        return getattr(self._oauth_proxy, name)
+
     async def verify_token(self, token: str) -> Optional[AccessToken]:
         """
         Verify authentication token using OAuth or API key validation.
@@ -607,7 +608,7 @@ class HybridAuthProvider(OAuthProxy):
         Returns:
             AccessToken with claims if valid, None otherwise
         """
-        # Try OAuth JWT validation first using the parent OAuthProxy
+        # Try OAuth JWT validation first using the delegated OAuthProxy
         try:
             result = await self._oauth_proxy.verify_token(token)
             if result:
