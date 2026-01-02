@@ -4,15 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**MCP Proxy Server** is a production-ready, resilient proxy that aggregates multiple Model Context Protocol (MCP) servers through a single unified endpoint with **built-in OAuth 2.1 authentication via Auth0**.
+**MCP Proxy Server** is a production-ready, resilient proxy that aggregates multiple Model Context Protocol (MCP) servers through a single unified endpoint with **API key authentication**.
 
 **Key Features:**
-- ✅ **Claude Connector Compatible** - Works with Claude's MCP Connector API
-- 🔐 **OAuth 2.1 + PKCE** - Secure authentication with Auth0 (or any OAuth 2.1 provider)
-- 👤 **User Identity Tracking** - Know which user is accessing which tools
-- 🚀 **Multi-Server Aggregation** - Supports stdio-based (uvx/npx), SSE, and Streamable MCP servers
+- 🔐 **API Key Authentication** - Simple Bearer token validation
+- 🚀 **Multi-Server Aggregation** - Supports stdio-based (uvx/npx), SSE, and HTTP MCP servers
 - 🔄 **Live Config Reload** - Update server definitions without restarting
 - 🏥 **Resilient** - Automatic restart, exponential backoff, port availability checking
+- 👤 **Client Identity Tracking** - Each API key maps to a client_id for tracking/logging
 
 ## Architecture
 
@@ -20,11 +19,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **proxy_server.py** - Main application with key functions and classes:
 
-- `create_auth_provider()` - Initializes OAuth authentication using FastMCP's `OAuthProxy` with Auth0
-  - Creates `JWTVerifier` for token validation via Auth0 JWKS endpoint
-  - Configures OAuthProxy with Auth0 endpoints, credentials, and audience parameters
-  - Enables PKCE forwarding and consent screen for security
-- `load_users()` - Loads authorized users from `/data/users.json` (user whitelist)
+- `load_api_keys()` - Loads API keys from environment or JSON file
+  - Supports `MCP_API_KEYS` env var (format: `key1:client1,key2:client2`)
+  - Supports `MCP_API_KEYS_PATH` for JSON file
+  - Returns dict mapping API key strings to their claims
 - `ResilientMCPProxy` - Orchestrates server lifecycle with:
   - Automatic restart on crashes with exponential backoff (max 10 attempts)
   - Live config reloading via file watching
@@ -41,60 +39,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     "server-name": {
       "command": "npx|uvx",
       "args": ["package-name", "...args"]
+    },
+    "remote-server": {
+      "url": "https://server.com/mcp",
+      "transport": "http|sse",
+      "headers": {
+        "Authorization": "Bearer token"
+      }
     }
   }
 }
 ```
 
-**/data/users.json** - Authorized users whitelist (**TODO: Not currently enforced**):
+**/data/users.json** - User whitelist (future feature, not currently enforced):
 ```json
 {
-  "user@example.com": {
-    "name": "User Name",
-    "roles": ["admin"],
+  "client-id-1": {
+    "name": "Client Name",
     "allowed_tools": ["*"]
   }
 }
 ```
 
-**Note**: User whitelisting is defined but not currently implemented. All users authenticated via OAuth are currently allowed. Access control happens at the OAuth provider level (Auth0/Keycloak/etc). See TODO in `create_proxy()` for planned implementation.
-
-**/data/auth_config.json** - Auth provider configuration (auto-generated):
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "${AUTH0_DOMAIN}",
-    "jwks_uri": "https://${AUTH0_DOMAIN}/.well-known/jwks.json",
-    "issuer": "https://${AUTH0_DOMAIN}/",
-    "audience": "${AUTH0_AUDIENCE}"
-  }
-}
-```
+**Note**: User whitelisting is planned but not implemented. All valid API keys currently have full access.
 
 ### Server Lifecycle
 
 1. **Startup** - `ResilientMCPProxy.run_with_restart()` orchestration loop starts
-2. **Auth Setup** - `create_auth_provider()` initializes OAuthProxy with Auth0
-   - Validates Auth0 environment variables are set
-   - Creates JWTVerifier pointing to Auth0 JWKS endpoint
-   - Initializes OAuthProxy for DCR and OAuth flow
+2. **API Keys Load** - `load_api_keys()` loads authentication credentials
+   - Tries `MCP_API_KEYS` environment variable first
+   - Falls back to `MCP_API_KEYS_PATH` JSON file if set
+   - Validates format and returns key-to-claims mapping
 3. **Config Load** - Configuration loaded with retry logic (`load_config_with_retry()`)
    - Validates JSON schema against `mcp_config.schema.json`
    - Expands environment variables in config
-   - **TODO**: Load and enforce user whitelist from `/data/users.json`
-4. **FastMCP Creation** - Unified FastMCP instance created via `FastMCP.as_proxy(config, auth=auth)`
+4. **Auth Provider Creation** - Creates `StaticTokenVerifier` with loaded API keys
+   - Simple Bearer token validation
+   - Maps tokens to client_id for tracking
+5. **FastMCP Creation** - Unified FastMCP instance created via `FastMCP.as_proxy(config, auth=auth)`
    - Single endpoint aggregates all configured MCP servers
-   - OAuthProxy middleware handles authentication
-5. **HTTP Server** - FastMCP runs native HTTP transport on `0.0.0.0:8080` (or configured host/port)
-   - Listens at `/mcp/` endpoint (OAuth discovery at `/.well-known/` endpoints)
-6. **File Watching** - Watchdog monitors config directory for changes
+   - StaticTokenVerifier middleware handles authentication
+6. **HTTP Server** - FastMCP runs native HTTP transport on `0.0.0.0:8080` (or configured host/port)
+   - Listens at `/mcp` endpoint
+   - `/health` endpoint for health checks
+7. **File Watching** - Watchdog monitors config directory for changes
    - Debounces events with 1s delay
    - On change, exits with code 42 (triggers clean reload)
-7. **Error Handling** - Crashes trigger exponential backoff restart
+8. **Error Handling** - Crashes trigger exponential backoff restart
    - Delays: 1s, 2s, 4s, 8s, 16s, max 30s
    - Max 10 restart attempts
-8. **Port Management** - `wait_for_port_available()` checks port before restart
+9. **Port Management** - `wait_for_port_available()` checks port before restart
    - Waits up to 10 seconds for port to be available
    - Critical for live reload
 
@@ -108,31 +102,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Local Development with OAuth
+### Local Development
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Copy environment template
-cp .env.example .env
-# Edit .env with your Auth0 credentials
+# Set API keys
+export MCP_API_KEYS="sk-dev-key:local-dev"
 
-# Create data directories
-mkdir -p data
-
-# Create authorized users
-cat > data/users.json << 'EOF'
-{
-  "your-email@example.com": {
-    "name": "Your Name",
-    "roles": ["admin"],
-    "allowed_tools": ["*"]
-  }
-}
-EOF
-
-# Run with OAuth enabled
+# Run the server
 python proxy_server.py
 
 # Run with live reload enabled
@@ -144,8 +123,11 @@ MCP_LIVE_RELOAD=true python proxy_server.py
 # Build locally
 docker build -t mcp-proxy .
 
-# Run with custom config
-docker run -p 8080:8080 -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro mcp-proxy
+# Run with custom config and API keys
+docker run -p 8080:8080 \
+  -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro \
+  -e MCP_API_KEYS="sk-dev:local" \
+  mcp-proxy
 
 # Build multi-arch (requires buildx)
 docker buildx build --platform linux/amd64,linux/arm64 -t mcp-proxy .
@@ -154,46 +136,40 @@ docker buildx build --platform linux/amd64,linux/arm64 -t mcp-proxy .
 ### Testing
 
 ```bash
-# Check OAuth well-known endpoints
-curl http://localhost:8080/.well-known/oauth-protected-resource
-curl http://localhost:8080/.well-known/oauth-authorization-server
+# Generate an API key
+API_KEY="sk-$(openssl rand -hex 16)"
 
-# Test DCR (Dynamic Client Registration) - should return 201 with credentials
-curl -X POST http://localhost:8080/register \
+# Start the server
+export MCP_API_KEYS="$API_KEY:test-client"
+python proxy_server.py &
+
+# Test health endpoint (no auth)
+curl http://localhost:8080/health
+
+# Test health endpoint (with auth - shows server list)
+curl -H "Authorization: Bearer $API_KEY" http://localhost:8080/health
+
+# Test MCP endpoint (requires auth)
+curl -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "client_name": "test-client",
-    "redirect_uris": ["http://localhost:3000/callback"],
-    "response_types": ["code"],
-    "grant_types": ["authorization_code", "refresh_token"],
-    "token_endpoint_auth_method": "client_secret_post"
-  }'
-
-# Test MCP endpoint (should be 401 without auth)
-curl http://localhost:8080/mcp
-
-# Test with valid token (after OAuth flow)
-curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
+  -X POST http://localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
 ## Environment Variables
 
-### OAuth Configuration (Required for Authentication)
+### Authentication (Required)
 
-- `MCP_AUTH_PROVIDER` - Enable OAuth: set to `oauth_proxy` to enable Auth0
-- `AUTH0_CLIENT_ID` - Auth0 application client ID (from Dashboard → Applications → Your App)
-- `AUTH0_CLIENT_SECRET` - Auth0 application client secret
-- `AUTH0_DOMAIN` - Auth0 tenant domain (e.g., `your-tenant.us.auth0.com`)
-- `AUTH0_AUDIENCE` - Auth0 API identifier (Audience) - must match configured API
+- `MCP_API_KEYS` - API keys in format `key1:client1,key2:client2`
+  - Example: `MCP_API_KEYS="sk-abc123:letta,sk-xyz789:local-dev"`
+  - Each key maps to a client_id for tracking
+- `MCP_API_KEYS_PATH` - Alternative: path to JSON file with API keys
+  - Format: `{"key": {"client_id": "name", "scopes": ["*"]}}`
 
 ### MCP Proxy Configuration
 
-- `MCP_BASE_URL` - Public URL where proxy is accessible (e.g., `https://mcp.your-domain.com`)
-  - **Must match the URL used in Claude Connector**
-  - Required for OAuth redirect URI validation
 - `MCP_CONFIG_PATH` - Path to MCP servers config (default: `mcp_config.json`)
-- `MCP_USERS_PATH` - Path to authorized users whitelist (default: `/data/users.json`)
-- `MCP_AUTH_CONFIG_PATH` - Path to auth provider config (default: `/data/auth_config.json`)
+- `MCP_USERS_PATH` - Path to user whitelist (default: `/data/users.json`, not enforced yet)
 - `MCP_HOST` - Bind host address (default: `0.0.0.0`)
 - `MCP_PORT` - Bind port (default: `8080`)
 
@@ -206,114 +182,44 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
 ### Optional Security
 
 - `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none)
-  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
+  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp`
   - Useful for security through obscurity or multi-tenant deployments
 - `MCP_DISABLE_AUTH` - Disable all authentication: `true|1|yes` (default: false, **NOT RECOMMENDED**)
 
-### API Key Authentication
+## API Key Authentication
 
-- `MCP_API_KEYS` - API keys for service accounts (format: `key1:client1,key2:client2`)
-  - Example: `MCP_API_KEYS="sk-prod-abc123:ci-bot,sk-prod-xyz789:monitoring"`
-  - Each key maps to a client_id with full scopes (`["*"]`)
-  - Can be used **alongside OAuth** for hybrid authentication
-- `MCP_API_KEYS_PATH` - Path to API keys JSON file (alternative to env var)
-  - Format: `{"api-key-string": {"client_id": "user", "scopes": ["*"]}}`
+### How It Works
 
-## Hybrid Authentication (OAuth + API Keys)
+1. Client sends request with `Authorization: Bearer sk-api-key-here` header
+2. `StaticTokenVerifier` validates the token against configured keys
+3. If valid, request proceeds with client_id from key mapping
+4. If invalid, returns 401 Unauthorized
 
-MCP Proxy supports **both OAuth and API keys simultaneously** via `HybridAuthProvider`:
+### Configuration Formats
 
-- **OAuth 2.1** - For interactive users (Claude Desktop, web clients)
-- **API Keys** - For service accounts (CI/CD, monitoring, automation)
-
-### Configuration Examples
-
+**Environment Variable (Simple):**
 ```bash
-# OAuth only (interactive users)
-export MCP_AUTH_PROVIDER=oauth_proxy
-export AUTH0_DOMAIN=your-tenant.us.auth0.com
-export AUTH0_CLIENT_ID=your-client-id
-export AUTH0_CLIENT_SECRET=your-client-secret
-export AUTH0_AUDIENCE=your-api-audience
-
-# API keys only (service accounts)
-export MCP_API_KEYS="sk-prod-abc123:ci-bot,sk-prod-xyz789:monitoring"
-
-# Both (recommended for production)
-export MCP_AUTH_PROVIDER=oauth_proxy
-export AUTH0_DOMAIN=your-tenant.us.auth0.com
-export AUTH0_CLIENT_ID=your-client-id
-export AUTH0_CLIENT_SECRET=your-client-secret
-export AUTH0_AUDIENCE=your-api-audience
-export MCP_API_KEYS="sk-prod-abc123:ci-bot"
+MCP_API_KEYS="key1:client1,key2:client2,key3:client3"
 ```
 
-### Authentication Flow
-
-When a request arrives with `Authorization: Bearer <token>`:
-
-1. **OAuth Validation** - Tries to validate as OAuth JWT token first
-   - Uses JWTVerifier with Auth0 JWKS endpoint
-   - Validates issuer, audience, signature, expiry
-2. **API Key Fallback** - If OAuth fails, tries static API key validation
-   - Uses StaticTokenVerifier with configured keys
-   - Returns client_id and scopes for the key
-3. **Rejection** - If both fail, returns 401 Unauthorized
-
-### Use Cases
-
-- **Interactive users** → OAuth (full auth flow with consent)
-- **CI/CD pipelines** → API keys (no browser needed)
-- **Monitoring services** → API keys (long-lived credentials)
-- **Admin scripts** → API keys (programmatic access)
-
-## OAuth 2.1 Authentication
-
-### Overview
-
-MCP Proxy uses FastMCP's `OAuthProxy` to wrap Auth0 and provide secure authentication:
-
-1. **Dynamic Client Registration (DCR)** - Claude registers itself and gets fixed Auth0 credentials
-2. **Authorization Flow** - User logs into Auth0 with PKCE security
-3. **Consent Screen** - User approves which client gets access (prevents confused deputy attacks)
-4. **Token Exchange** - Auth0 issues JWT, OAuthProxy wraps in FastMCP JWT
-5. **Protected Access** - Subsequent MCP requests validated using JWT signature
-
-### Key Security Features
-
-- **PKCE (Proof Key for Code Exchange)** - End-to-end forwarding prevents token interception
-- **JWT Validation** - Tokens validated via Auth0 JWKS endpoint (public key pinning)
-- **User Whitelist** - **TODO**: Planned feature to restrict access to users in `/data/users.json`
-  - Currently, access control happens at OAuth provider level (Auth0/Keycloak user management)
-- **Consent Screen** - Explicit user approval before client gains access
-- **Encrypted Storage** - OAuth tokens encrypted at rest using Fernet encryption
-- **Token Expiry** - FastMCP tokens expire when upstream Auth0 tokens expire
-
-### OAuth Endpoints
-
-Automatically provided by OAuthProxy (via FastMCP):
-
-- `POST /.well-known/oauth-protected-resource` - OAuth server metadata
-- `GET /.well-known/oauth-authorization-server` - Authorization server info
-- `POST /register` - DCR endpoint (clients self-register)
-- `GET /authorize` - Authorization endpoint
-- `POST /token` - Token exchange endpoint
-- `GET /auth/callback` - OAuth callback from Auth0
-
-### Debug Logging
-
-To see OAuth request details, enable httpx debug logging:
-
-```python
-import logging
-logging.getLogger("httpx").setLevel(logging.DEBUG)
+**JSON File (Advanced):**
+```json
+{
+  "sk-abc123def456": {
+    "client_id": "letta-cloud",
+    "scopes": ["*"]
+  },
+  "sk-xyz789uvw012": {
+    "client_id": "local-development",
+    "scopes": ["*"]
+  }
+}
 ```
 
-This shows:
-- Auth0 token requests with audience parameters
-- JWKS endpoint calls for key validation
-- Token validation successes/failures
-- Scope parameter passing
+Set path:
+```bash
+MCP_API_KEYS_PATH=/data/api_keys.json
+```
 
 ## Versioning
 
@@ -327,10 +233,10 @@ Uses automatic semantic versioning via GitHub Actions:
 To manually bump version:
 ```bash
 # Minor version bump
-sed -i 's/__version__ = "1.0.*"/__version__ = "1.1.0"/' version.py
+sed -i 's/__version__ = "2.0.*"/__version__ = "2.1.0"/' version.py
 
 # Major version bump
-sed -i 's/__version__ = "1.*"/__version__ = "2.0.0"/' version.py
+sed -i 's/__version__ = "2.*"/__version__ = "3.0.0"/' version.py
 ```
 
 ## CI/CD
@@ -340,7 +246,7 @@ GitHub Actions workflow (`.github/workflows/docker-build.yml`) handles:
 1. **Version job**: Auto-increments patch, updates `version.py`, creates git tag
 2. **Build job**: Multi-arch Docker build (amd64/arm64), pushes to GHCR
 
-Tags generated: `latest`, `v1.0.x`, `1.0`, `1`, `sha-abc123`, `main`
+Tags generated: `latest`, `v2.0.x`, `2.0`, `2`, `sha-abc123`, `main`
 
 ## Key Implementation Details
 
@@ -356,3 +262,92 @@ Tags generated: `latest`, `v1.0.x`, `1.0`, `1`, `sha-abc123`, `main`
 - File not found and JSON syntax errors are permanent (no retry)
 - Other errors retry with exponential backoff: 1s, 2s, 4s, 8s...
 - Restart delay caps at 30 seconds to prevent excessive waiting
+
+### Security Considerations
+- API keys should be generated using cryptographically secure random (e.g., `openssl rand -hex 32`)
+- Each key maps to a client_id for auditing/tracking
+- In production, always use HTTPS (deploy behind Cloudflare Tunnel, nginx, or load balancer)
+- Never commit API keys to git - use environment variables or mounted volumes
+
+## Common Development Tasks
+
+### Adding a New Environment Variable
+
+1. Update docstring in `proxy_server.py`
+2. Add default value if applicable
+3. Update `.env.example` with description
+4. Update `CLAUDE.md` (this file) and `README.md`
+
+### Modifying Authentication
+
+API key authentication is handled in `create_proxy()`:
+
+```python
+# Load API keys
+api_keys = load_api_keys()
+
+# Create auth provider
+if api_keys:
+    auth = StaticTokenVerifier(tokens=api_keys, required_scopes=None)
+```
+
+To modify validation logic, check `StaticTokenVerifier` in FastMCP library.
+
+### Adding New MCP Server Types
+
+FastMCP's `as_proxy()` supports:
+- **stdio**: `command` + `args` (e.g., npx, uvx)
+- **http**: `url` + `transport: "http"` + optional `headers`
+- **sse**: `url` + `transport: "sse"` + optional `headers`
+
+Add new server to `mcp_config.json` - no code changes needed.
+
+### Debugging
+
+Enable debug logging:
+```bash
+export MCP_LOG_LEVEL=DEBUG
+python proxy_server.py
+```
+
+Or set specific loggers:
+```bash
+export MCP_LOG_LEVELS="fastmcp:DEBUG,httpx:INFO"
+```
+
+Check logs for:
+- API key validation: `Token verified via API key for client: <client_id>`
+- Server startup: `✓ API key authentication enabled`
+- Config loading: `✓ Loaded configuration from <path>`
+
+## OAuth Support (Historical)
+
+This project previously supported OAuth 2.1 authentication with Auth0, Keycloak, Okta, and Generic OIDC providers.
+
+**If you need OAuth**: Check out the `v2.0-oauth` git tag:
+```bash
+git checkout v2.0-oauth
+```
+
+OAuth was removed to simplify the codebase and focus on the primary use case (API keys for tools like Letta, local development, and programmatic access).
+
+## Future Enhancements
+
+Planned features (see GitHub Issues):
+- User whitelist enforcement (respect `/data/users.json`)
+- Rate limiting per API key
+- Tool-level access control (granular permissions)
+- Metrics and monitoring dashboard
+- Request/response logging
+
+## Support & Contributing
+
+- **Issues**: https://github.com/jonhearsch/mcp-proxy/issues
+- **Pull Requests**: https://github.com/jonhearsch/mcp-proxy/pulls
+- **Discussions**: https://github.com/jonhearsch/mcp-proxy/discussions
+
+When contributing:
+1. Follow existing code style
+2. Update documentation (README.md, CLAUDE.md)
+3. Test with both environment variable and JSON file API key configs
+4. Ensure Docker build works: `docker build -t mcp-proxy .`

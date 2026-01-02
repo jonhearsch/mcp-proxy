@@ -1,89 +1,66 @@
-# MCP Proxy Server - Use Claude AI & LibreChat Remotely with Any MCP Server
+# MCP Proxy Server - Remote MCP Server Gateway
 
-**Stop working from your local machine.** Access your Model Context Protocol (MCP) servers from anywhere using Claude AI or LibreChat - securely aggregate multiple MCP tools through one remote endpoint with OAuth 2.1 authentication.
+**Access your Model Context Protocol (MCP) servers from anywhere** - securely aggregate multiple MCP tools through one remote endpoint with API key authentication.
 
-**Use Claude Desktop, Claude Web, or LibreChat with remote MCP servers** - filesystem, database, API, and custom tools accessible from any device. **Solves LibreChat's Python MCP server compatibility issues.**
+Use **Claude Desktop, Letta, or any MCP client** with remote MCP servers - filesystem, database, API, and custom tools accessible from any device.
 
 ---
 
-### 🎯 Perfect for:
-- **Remote MCP access** - Use Claude AI or LibreChat tools from anywhere, not just localhost
-- **LibreChat Python MCP servers** - Run `uvx` based servers remotely (LibreChat can't run them locally)
-- **Team collaboration** - Share MCP servers securely across your organization
-- **Cloud deployments** - Host MCP tools on VPS, Docker, Kubernetes, or serverless
-- **Multi-device workflows** - Switch between work laptop, home desktop, and mobile
+## 🎯 Perfect for:
+- **Remote MCP access** - Use MCP tools from anywhere, not just localhost
+- **Letta Cloud integration** - Connect Letta to your self-hosted MCP servers
+- **Multi-device workflows** - Access tools from work laptop, home desktop, or cloud
+- **Cloud deployments** - Host MCP tools on VPS, Docker, Kubernetes
 - **Centralized tool management** - One endpoint for all your MCP servers
+- **Local development** - Simple API-key auth for personal projects
 
 ## Why MCP Proxy?
 
 **Problems:**
-1. Claude's MCP support only works with servers running on your local machine
-2. LibreChat can't run Python-based MCP servers (`uvx` commands fail due to missing Python dependencies)
-3. You can't access your tools remotely, share with teammates, or use from different devices
+1. MCP servers only run on your local machine
+2. Can't access tools remotely or share with other services
+3. Each tool runs separately - hard to manage
 
 **Solution:** MCP Proxy is a **remote MCP server gateway** that lets you:
-- ✅ Access Claude AI or LibreChat tools from **anywhere** (not just localhost)
-- ✅ **Fix LibreChat Python MCP issues** - Run `uvx` servers remotely, connect via `streamable-http`
-- ✅ Use Claude Desktop, Claude Web, LibreChat, or any MCP client remotely
+- ✅ Access MCP tools from **anywhere** (not just localhost)
+- ✅ Use with Claude Desktop, Letta, custom apps, or any MCP client
 - ✅ Deploy MCP servers once, use everywhere
-- ✅ Share tools securely with team members
 - ✅ Aggregate multiple MCP servers into one endpoint
+- ✅ Simple API key authentication
 
 ## Features
 
 ### Remote Access & Deployment
-- 🌐 **Remote MCP Server Access** - Use Claude AI from anywhere, not just your local machine
-- ☁️ **Cloud-Ready** - Deploy to AWS, GCP, Azure, DigitalOcean, Railway, Render, or any VPS
+- 🌐 **Remote MCP Server Access** - Use MCP from anywhere
+- ☁️ **Cloud-Ready** - Deploy to any VPS, Docker, Kubernetes
 - 🐳 **Docker Support** - One-line deployment with multi-architecture support (AMD64/ARM64)
-- 🔒 **Secure Remote Access** - Built-in OAuth 2.1 + PKCE authentication via Auth0
-- 🔐 **Cloudflare Tunnel Ready** - Expose securely without public IP or port forwarding
+- 🔒 **API Key Authentication** - Simple Bearer token auth
+- 🔐 **Cloudflare Tunnel Ready** - Expose securely without public IP
 
 ### MCP Server Management
 - 🚀 **Multi-Server Aggregation** - Combine stdio (uvx, npx), SSE, and HTTP MCP servers
-- 📝 **Claude-Compatible Config** - Same JSON format as Claude Desktop configuration
+- 📝 **Claude-Compatible Config** - Same JSON format as Claude Desktop
 - 🔄 **Live Config Reload** - Add/remove servers without restarting
-- ✅ **Multi-Client Support** - Works with Claude AI, LibreChat, and any MCP-compatible client
-- 💬 **LibreChat Python MCP Fix** - Solves LibreChat's `uvx` Python server compatibility issues
+- ✅ **Multi-Client Support** - Works with any MCP-compatible client
 - 🏥 **Auto-Restart & Health Checks** - Resilient server lifecycle management
 
-### Security & Control
-- 🔐 **Multiple OAuth Providers** - Auth0, Keycloak, Okta, or any OIDC-compliant provider
-- 👤 **User Identity Tracking** - Know which team member is using which tools
-- 🎫 **Granular Permissions** - Control tool access per user with allow/deny lists
-- 🔐 **Zero-Trust Ready** - Works with network segmentation and access policies
-- 🔒 **Encrypted Tokens** - OAuth tokens encrypted at rest
+### Security
+- 🔐 **API Key Authentication** - Secure Bearer token validation
+- 👤 **Client Identity Tracking** - Know which client is using which tools
+- 🔒 **Optional Path Obscurity** - Add UUID prefix to endpoint URL
 
-## Quick Start - Remote MCP in 10 Minutes
+## Quick Start - Remote MCP in 5 Minutes
 
-Get Claude AI working with remote MCP servers in 3 steps:
+Get your MCP proxy running in 3 steps:
 
 ### Prerequisites
 
-- **Docker** (easiest) or **Python 3.10+** (for development)
-- **OAuth Provider** - Auth0 (free), Keycloak, Okta, or any OIDC provider
-- **Public URL** - Domain, VPS IP, or Cloudflare Tunnel (free options below)
+- **Docker** (easiest) or **Python 3.10+**
+- **Public URL** (optional) - Domain, VPS IP, or Cloudflare Tunnel
 
-> **Note:** This guide uses Auth0 for simplicity. For other providers (Keycloak, Okta, Generic OIDC), see [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md).
+### 1. Create Configuration
 
-### 1. Auth0 Setup (5 minutes)
-
-1. Create an Auth0 account at https://auth0.com
-2. Create a **Regular Web Application**:
-   - Dashboard → Applications → Create Application
-   - Type: "Regular Web Application"
-   - Name: "MCP Proxy"
-3. In the application **Settings** tab:
-   - Copy your **Client ID** and **Client Secret**
-   - Set **Allowed Callback URLs** to: `https://your-domain.com/auth/callback`
-4. Create an **API**:
-   - Dashboard → Applications → APIs → Create API
-   - Name: "MCP Proxy API"
-   - Identifier: `https://your-mcp-api` (or any unique identifier)
-5. Copy your **Auth0 Domain** from Settings (e.g., `your-tenant.us.auth0.com`)
-
-### 2. Configure MCP Proxy
-
-#### Create `mcp_config.json`
+Create `mcp_config.json`:
 
 ```json
 {
@@ -93,173 +70,238 @@ Get Claude AI working with remote MCP servers in 3 steps:
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
     },
     "time": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-time"]
+      "command": "uvx",
+      "args": ["mcp-server-time"]
+    },
+    "remote-server": {
+      "url": "https://other-server.com/sse",
+      "transport": "sse",
+      "headers": {
+        "Authorization": "Bearer your-token"
+      }
     }
   }
 }
 ```
 
-#### Create `/data/users.json`
+### 2. Run with Docker
+
+```bash
+# Generate an API key (or use your own)
+API_KEY="sk-$(openssl rand -hex 16)"
+echo "Your API key: $API_KEY"
+
+# Run the proxy
+docker run -d \
+  --name mcp-proxy \
+  -p 8080:8080 \
+  -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro \
+  -e MCP_API_KEYS="$API_KEY:my-client" \
+  ghcr.io/jonhearsch/mcp-proxy:latest
+
+# Test it
+curl -H "Authorization: Bearer $API_KEY" http://localhost:8080/health
+```
+
+### 3. Connect Your Client
+
+#### Claude Desktop
+
+Add to your Claude Desktop configuration:
 
 ```json
 {
-  "you@example.com": {
-    "name": "Your Name",
-    "roles": ["admin"],
-    "allowed_tools": ["*"]
+  "mcpServers": {
+    "remote-proxy": {
+      "url": "http://localhost:8080/mcp",
+      "transport": "http",
+      "headers": {
+        "Authorization": "Bearer sk-your-api-key-here"
+      }
+    }
   }
 }
 ```
 
-#### Create `.env`
+#### Letta
+
+Configure Letta to use your remote MCP proxy:
 
 ```bash
-# Auth0 Credentials
-AUTH0_CLIENT_ID=your-client-id-from-step-1
-AUTH0_CLIENT_SECRET=your-client-secret-from-step-1
-AUTH0_DOMAIN=your-tenant.us.auth0.com
-AUTH0_AUDIENCE=https://your-mcp-api
-
-# MCP Proxy Configuration
-MCP_AUTH_PROVIDER=oauth_proxy
-MCP_BASE_URL=https://your-domain.com
-MCP_USERS_PATH=/data/users.json
-MCP_AUTH_CONFIG_PATH=/data/auth_config.json
+# In Letta configuration or environment
+MCP_ENDPOINT=http://your-server:8080/mcp
+MCP_API_KEY=sk-your-api-key-here
 ```
 
-### 3. Run MCP Proxy
+#### Custom Client (Python)
 
-#### Using Docker
+```python
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 
+client = Client(
+    transport=StreamableHttpTransport(
+        url="http://localhost:8080/mcp",
+        headers={"Authorization": "Bearer sk-your-api-key-here"}
+    )
+)
+
+async with client:
+    # List available tools
+    tools = await client.list_tools()
+
+    # Call a tool
+    result = await client.call_tool("filesystem:read_file", {"path": "/data/test.txt"})
+```
+
+## Deployment Options
+
+### Docker (Recommended)
+
+**Basic deployment:**
 ```bash
-docker run -p 8080:8080 \
+docker run -d \
+  --name mcp-proxy \
+  -p 8080:8080 \
   -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro \
-  -v $(pwd)/data:/data \
-  --env-file .env \
+  -e MCP_API_KEYS="sk-abc123:client1,sk-xyz789:client2" \
   ghcr.io/jonhearsch/mcp-proxy:latest
 ```
 
-#### Using Docker Compose
+**With persistent data:**
+```bash
+docker run -d \
+  --name mcp-proxy \
+  -p 8080:8080 \
+  -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro \
+  -v $(pwd)/data:/data \
+  -e MCP_API_KEYS="sk-abc123:letta,sk-xyz789:local-tools" \
+  -e MCP_LIVE_RELOAD=true \
+  ghcr.io/jonhearsch/mcp-proxy:latest
+```
+
+**Using API keys file:**
+```bash
+# Create api_keys.json
+cat > api_keys.json << 'EOF'
+{
+  "sk-abc123": {
+    "client_id": "letta-cloud",
+    "scopes": ["*"]
+  },
+  "sk-xyz789": {
+    "client_id": "local-dev",
+    "scopes": ["*"]
+  }
+}
+EOF
+
+docker run -d \
+  --name mcp-proxy \
+  -p 8080:8080 \
+  -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro \
+  -v $(pwd)/api_keys.json:/data/api_keys.json:ro \
+  -e MCP_API_KEYS_PATH=/data/api_keys.json \
+  ghcr.io/jonhearsch/mcp-proxy:latest
+```
+
+### Docker Compose
+
+Create `docker-compose.yml`:
 
 ```yaml
-version: "3.8"
+version: '3.8'
 
 services:
   mcp-proxy:
     image: ghcr.io/jonhearsch/mcp-proxy:latest
+    container_name: mcp-proxy
+    restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - ./mcp_config.json:/app/mcp_config.json:ro
       - ./data:/data
-    env_file:
-      - .env
-    restart: unless-stopped
+    environment:
+      - MCP_API_KEYS=sk-abc123:letta-cloud,sk-xyz789:local-dev
+      - MCP_LIVE_RELOAD=true
+      - MCP_PORT=8080
 ```
 
-#### Local Development (Python)
+Run with:
+```bash
+docker-compose up -d
+```
+
+### Python (Development)
 
 ```bash
+# Clone the repository
+git clone https://github.com/jonhearsch/mcp-proxy.git
+cd mcp-proxy
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Set environment variables
+export MCP_API_KEYS="sk-abc123:client1,sk-xyz789:client2"
+
+# Run the server
 python proxy_server.py
 ```
 
-### 4. Connect Claude AI to Your Remote MCP Server
+### Cloudflare Tunnel (Free Public Access)
 
-Now connect Claude to your remote MCP proxy:
+Expose your local proxy securely without a public IP:
 
-1. **Open Claude** - Visit https://claude.ai or open Claude Desktop
-2. **Go to Settings** → **MCP Connectors**
-3. **Add Connection** - Click **+ Add Connection**
-4. **Enter URL** - Use your remote server: `https://your-domain.com/mcp`
-5. **Authenticate** - Log in via Auth0 (opens in browser)
-6. **Grant Access** - Approve the consent screen
-7. **Done!** - Claude now has access to all your remote MCP tools
+```bash
+# Install cloudflared
+# macOS: brew install cloudflare/cloudflare/cloudflared
+# Linux: wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+#        sudo dpkg -i cloudflared-linux-amd64.deb
 
-**You can now use Claude from any device** - work laptop, home computer, or mobile - all connected to the same remote MCP servers.
+# Login to Cloudflare
+cloudflared tunnel login
 
----
+# Create a tunnel
+cloudflared tunnel create mcp-proxy
 
-### LibreChat Integration
+# Start the proxy locally
+docker run -d --name mcp-proxy -p 8080:8080 \
+  -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro \
+  -e MCP_API_KEYS="sk-abc123:letta" \
+  ghcr.io/jonhearsch/mcp-proxy:latest
 
-**MCP Proxy works seamlessly with LibreChat** using the `streamable-http` transport. This is especially useful because:
+# Route the tunnel
+cloudflared tunnel route dns mcp-proxy mcp.your-domain.com
 
-- ✅ **Python MCP servers work** - LibreChat has issues with Python-based MCP servers (`uvx` commands fail). MCP Proxy solves this by running Python servers remotely.
-- ✅ **Remote access** - LibreChat can connect to your remote MCP tools without local installation
-- ✅ **OAuth authentication** - Secure user authentication via Auth0/Keycloak/Okta
-
-**Configuration:**
-
-Add to your LibreChat `librechat.yaml`:
-
-```yaml
-mcpServers:
-  your_mcp_proxy:
-    type: streamable-http
-    url: "https://your-domain.com/mcp"
+# Run the tunnel
+cloudflared tunnel run mcp-proxy
 ```
 
-**Note:** You must specify `type: streamable-http` - LibreChat defaults to SSE transport which won't work with MCP Proxy's HTTP transport.
-
-**Benefits vs. local Python MCP servers:**
-- No Python dependencies needed in LibreChat container
-- Centralized MCP server management
-- Works with `uvx` and `npx` based servers
-- OAuth-protected access
-
----
-
-## How Remote MCP Access Works
-
-Instead of Claude only talking to localhost MCP servers, it connects to your remote proxy:
-
-```
-┌─────────────────────────────┐
-│  Claude AI (Any Device)     │
-│  • Desktop app              │
-│  • Web browser              │
-│  • Mobile (future)          │
-└────────────┬────────────────┘
-             │
-             │ HTTPS + OAuth 2.1
-             │ (Secure Remote Access)
-             ↓
-    ┌─────────────────────────────┐
-    │   🌐 Your Remote Server     │
-    │   (VPS, Cloud, or Home)     │
-    │                             │
-    │  ┌──────────────────────┐   │
-    │  │  MCP Proxy           │   │
-    │  │  • Auth0 OAuth       │   │
-    │  │  • User validation   │   │
-    │  │  • Token encryption  │   │
-    │  └──────────┬───────────┘   │
-    │             │                │
-    │             ↓                │
-    │  ┌──────────────────────┐   │
-    │  │ Aggregated Endpoint  │   │
-    │  │ All tools at /mcp/   │   │
-    │  └──────────┬───────────┘   │
-    └─────────────┼────────────────┘
-                  │
-         ┌────────┴────────┐
-         ↓                 ↓
-    ┌─────────┐      ┌──────────┐
-    │  MCP    │      │   MCP    │
-    │ Server 1│      │ Server 2 │
-    │(Files)  │      │ (DB/API) │
-    └─────────┘      └──────────┘
-```
-
-**Result:** Use Claude AI from anywhere while your MCP servers run in one central location.
+Now accessible at: `https://mcp.your-domain.com`
 
 ## Configuration
 
-### `mcp_config.json`
+### Environment Variables
 
-Define all MCP servers that should be aggregated:
+**Required:**
+- `MCP_API_KEYS` - API keys in format `key1:client1,key2:client2`
+  - OR `MCP_API_KEYS_PATH` - Path to API keys JSON file
 
+**Optional:**
+- `MCP_CONFIG_PATH` - Path to mcp_config.json (default: `mcp_config.json`)
+- `MCP_HOST` - Host to bind to (default: `0.0.0.0`)
+- `MCP_PORT` - Port to listen on (default: `8080`)
+- `MCP_LIVE_RELOAD` - Enable live config reload: `true`/`false` (default: `false`)
+- `MCP_PATH_PREFIX` - Add UUID prefix to endpoint for obscurity (e.g., `/abc-123-def/mcp`)
+- `MCP_DISABLE_AUTH` - Disable authentication (NOT RECOMMENDED, default: `false`)
+
+### MCP Server Configuration
+
+The `mcp_config.json` file uses the same format as Claude Desktop:
+
+**Stdio servers (npx, uvx):**
 ```json
 {
   "mcpServers": {
@@ -270,388 +312,262 @@ Define all MCP servers that should be aggregated:
     "sqlite": {
       "command": "uvx",
       "args": ["mcp-server-sqlite", "--db-path", "/data/db.sqlite"]
-    },
-    "remote-sse": {
-      "url": "https://other-server.com/sse",
-      "transport": "sse"
     }
   }
 }
 ```
 
-### `/data/users.json`
-
-Define authorized users (whitelist):
-
-```json
-{
-  "user@example.com": {
-    "name": "User Name",
-    "roles": ["admin"],
-    "allowed_tools": ["*"]
-  },
-  "friend@example.com": {
-    "name": "Friend Name",
-    "roles": ["user"],
-    "allowed_tools": ["filesystem:*", "time:*"]
-  }
-}
-```
-
-### `/data/auth_config.json`
-
-Auth provider configuration (auto-generated, can be customized):
-
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "${AUTH0_DOMAIN}",
-    "jwks_uri": "https://${AUTH0_DOMAIN}/.well-known/jwks.json",
-    "issuer": "https://${AUTH0_DOMAIN}/",
-    "audience": "${AUTH0_AUDIENCE}"
-  }
-}
-```
-
-## Environment Variables
-
-### Authentication (Required for OAuth)
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MCP_AUTH_PROVIDER` | Enable OAuth: `oauth_proxy` | `oauth_proxy` |
-| `AUTH0_CLIENT_ID` | Auth0 application client ID | From Auth0 Settings |
-| `AUTH0_CLIENT_SECRET` | Auth0 application client secret | From Auth0 Settings |
-| `AUTH0_DOMAIN` | Auth0 tenant domain | `your-tenant.us.auth0.com` |
-| `AUTH0_AUDIENCE` | Auth0 API identifier | `https://your-mcp-api` |
-| `MCP_BASE_URL` | Your public server URL | `https://your-domain.com` |
-
-### File Paths
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MCP_CONFIG_PATH` | MCP servers configuration | `mcp_config.json` |
-| `MCP_USERS_PATH` | Authorized users file | `/data/users.json` |
-| `MCP_AUTH_CONFIG_PATH` | Auth provider config | `/data/auth_config.json` |
-
-### Server Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MCP_HOST` | Bind host address | `0.0.0.0` |
-| `MCP_PORT` | Bind port | `8080` |
-| `MCP_PATH_PREFIX` | URL path prefix for security | (none) |
-| `MCP_LIVE_RELOAD` | Enable live config reload | `false` |
-| `MCP_MAX_RETRIES` | Config load retries | `3` |
-| `MCP_RESTART_DELAY` | Restart delay (seconds) | `5` |
-
-## Deployment Options for Remote Access
-
-Choose your hosting strategy based on your needs:
-
-### Option 1: Cloud VPS (DigitalOcean, Linode, AWS, etc.)
-
-**Best for:** Production deployments, team use, always-on access
-
-1. Spin up a $5-10/month VPS with Docker
-2. Point a domain to your server IP
-3. Deploy with Docker Compose (see below)
-4. Access from anywhere: `https://mcp.yourdomain.com`
-
-### Option 2: Home Server + Cloudflare Tunnel (Free!)
-
-**Best for:** Personal use, no VPS cost, secure remote access
-
-1. Run MCP Proxy on a Raspberry Pi or home computer
-2. Use Cloudflare Tunnel for free HTTPS access (no port forwarding!)
-3. Access from anywhere without exposing your home IP
-
-See [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup) below.
-
-### Option 3: PaaS (Railway, Render, Fly.io)
-
-**Best for:** Zero DevOps, auto-scaling, simple setup
-
-Deploy with one click to platforms that auto-configure HTTPS and domains.
-
----
-
-### Docker Compose Example (Works for All Options)
-
-```yaml
-version: "3.8"
-
-services:
-  mcp-proxy:
-    image: ghcr.io/jonhearsch/mcp-proxy:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./mcp_config.json:/app/mcp_config.json:ro
-      - ./data:/data
-    environment:
-      # Auth0 OAuth Configuration
-      - MCP_AUTH_PROVIDER=oauth_proxy
-      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
-      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
-      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
-      - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
-
-      # MCP Proxy Configuration
-      - MCP_BASE_URL=https://mcp.your-domain.com
-      - MCP_USERS_PATH=/data/users.json
-      - MCP_AUTH_CONFIG_PATH=/data/auth_config.json
-
-      # Optional: Live reload on config changes
-      - MCP_LIVE_RELOAD=true
-    restart: unless-stopped
-
-  # Optional: Cloudflare Tunnel for secure public access
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      - mcp-proxy
-    restart: unless-stopped
-```
-
-### Cloudflare Tunnel Setup (Free Remote Access!)
-
-**Use this for:**
-- Remote access from anywhere without a VPS
-- Exposing your home server securely (no port forwarding)
-- Free HTTPS with automatic SSL certificates
-- Works with Claude AI from any device
-
-**Setup:**
-
-```bash
-# 1. Install cloudflared
-brew install cloudflare/cloudflare/cloudflared  # macOS
-# or download from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
-
-# 2. Authenticate
-cloudflared tunnel login
-
-# 3. Create tunnel
-cloudflared tunnel create mcp-proxy
-
-# 4. Create config
-cat > ~/.cloudflared/config.yml << EOF
-tunnel: mcp-proxy
-credentials-file: /path/to/credentials
-
-ingress:
-  - hostname: mcp.your-domain.com
-    service: http://localhost:8080
-  - service: http_status:404
-EOF
-
-# 5. Start tunnel
-cloudflared tunnel run mcp-proxy
-```
-
-Then set `MCP_BASE_URL=https://mcp.your-domain.com` in your `.env`.
-
-**Now Claude can access your MCP servers remotely** - even if they're running on a home Raspberry Pi!
-
-## Security
-
-### Best Practices
-
-✅ **Always use HTTPS** - Use Cloudflare Tunnel or similar for public access
-✅ **Secure Auth0 credentials** - Store in environment variables only, never in git
-✅ **Use `.env` file** - Add to `.gitignore` to prevent accidental commits
-✅ **Whitelist users** - Only add authorized users to `/data/users.json`
-✅ **Enable Auth0 MFA** - Require multi-factor authentication on your Auth0 account
-✅ **Rotate credentials** - Periodically update Auth0 client secret (every 90 days minimum)
-✅ **Bind to localhost** - Use `127.0.0.1` instead of `0.0.0.0` when behind a proxy/tunnel
-✅ **Strong tokens** - Generate with `openssl rand -hex 32` (minimum 32 bytes)
-
-### Built-in Security
-
-- **OAuth 2.1 + PKCE** - Industry-standard authentication with forward secrecy
-- **JWT Token Validation** - Tokens validated using Auth0's public JWKS endpoint
-- **Consent Screen** - Users must explicitly approve each client (prevents confused deputy attacks)
-- **Encrypted Token Storage** - OAuth tokens encrypted at rest using Fernet encryption
-- **User Whitelist** - Only pre-approved users (in `users.json`) can access tools
-
-### Configuration Security
-
-The `mcp_config.json` file supports environment variable substitution using `${VAR_NAME}` or `${VAR_NAME:-default}`:
-
+**HTTP/SSE remote servers:**
 ```json
 {
   "mcpServers": {
-    "example": {
-      "url": "${API_URL}",
+    "remote-http": {
+      "url": "https://api.example.com/mcp",
+      "transport": "http",
       "headers": {
-        "api-key": "${API_KEY}"
+        "Authorization": "Bearer remote-server-token",
+        "X-Custom-Header": "value"
+      }
+    },
+    "remote-sse": {
+      "url": "https://other-server.com/sse",
+      "transport": "sse",
+      "headers": {
+        "X-API-Key": "your-api-key"
       }
     }
   }
 }
 ```
 
-**⚠️ Never commit credentials to git!** Always use environment variables for sensitive data.
-
-## Development
-
-### Local Testing
-
-```bash
-# Clone and setup
-git clone https://github.com/jonhearsch/mcp-proxy.git
-cd mcp-proxy
-
-# Create development .env
-cat > .env << EOF
-AUTH0_CLIENT_ID=your-auth0-client-id
-AUTH0_CLIENT_SECRET=your-auth0-client-secret
-AUTH0_DOMAIN=your-tenant.us.auth0.com
-AUTH0_AUDIENCE=https://localhost:8000
-MCP_AUTH_PROVIDER=oauth_proxy
-MCP_BASE_URL=http://localhost:8080
-MCP_USERS_PATH=./data/users.json
-MCP_AUTH_CONFIG_PATH=./data/auth_config.json
-EOF
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create data directory and users
-mkdir -p data
-cat > data/users.json << EOF
+**Mixed configuration:**
+```json
 {
-  "your-email@example.com": {
-    "name": "Your Name",
-    "roles": ["admin"],
-    "allowed_tools": ["*"]
+  "mcpServers": {
+    "local-filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+    },
+    "remote-api": {
+      "url": "https://api.example.com/mcp",
+      "transport": "http",
+      "headers": {
+        "Authorization": "Bearer token"
+      }
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"]
+    }
   }
 }
-EOF
-
-# Run server
-python proxy_server.py
 ```
 
-Then access at `http://localhost:8080/mcp`
+### API Keys Configuration
 
-### Testing with cURL
+**Environment variable (simple):**
+```bash
+MCP_API_KEYS="sk-abc123:letta-cloud,sk-xyz789:local-dev,sk-def456:ci-bot"
+```
+
+**JSON file (advanced):**
+```json
+{
+  "sk-abc123def456": {
+    "client_id": "letta-cloud",
+    "scopes": ["*"]
+  },
+  "sk-xyz789uvw012": {
+    "client_id": "local-development",
+    "scopes": ["*"]
+  },
+  "sk-ci-bot-key": {
+    "client_id": "ci-pipeline",
+    "scopes": ["*"]
+  }
+}
+```
+
+Set environment variable:
+```bash
+MCP_API_KEYS_PATH=/data/api_keys.json
+```
+
+## API Reference
+
+### Health Check
 
 ```bash
-# Test health endpoint (no auth required)
+GET /health
+
+# Without auth (returns basic info)
 curl http://localhost:8080/health
 
-# Expected response:
-# {
-#   "status": "healthy",
-#   "version": "1.0.x",
-#   "servers": ["filesystem", "time"],
-#   "path_prefix": null
-# }
-
-# Test OAuth well-known endpoints
-curl http://localhost:8080/.well-known/oauth-protected-resource
-curl http://localhost:8080/.well-known/oauth-authorization-server
+# With auth (returns server list)
+curl -H "Authorization: Bearer sk-your-key" http://localhost:8080/health
 ```
 
-### Docker Build
+Response:
+```json
+{
+  "status": "healthy",
+  "service": "mcp-proxy",
+  "servers": ["filesystem", "time", "remote-api"]
+}
+```
+
+### MCP Endpoint
 
 ```bash
-# Build for local platform
-docker build -t mcp-proxy:dev .
+POST /mcp
+Authorization: Bearer sk-your-api-key
+Content-Type: application/json
 
-# Build multi-arch (requires buildx)
-docker buildx build --platform linux/amd64,linux/arm64 -t mcp-proxy:dev .
+# MCP protocol messages
+```
+
+## Use Cases
+
+### Letta Cloud Integration
+
+Connect Letta Cloud to your self-hosted tools:
+
+```bash
+# Run proxy with your tools
+docker run -d -p 8080:8080 \
+  -v $(pwd)/mcp_config.json:/app/mcp_config.json:ro \
+  -e MCP_API_KEYS="sk-letta-key:letta-cloud" \
+  ghcr.io/jonhearsch/mcp-proxy:latest
+
+# Configure Letta to use it
+# In Letta settings or environment:
+MCP_ENDPOINT=https://mcp.your-domain.com/mcp
+MCP_API_KEY=sk-letta-key
+```
+
+### Multi-Device Development
+
+Access the same tools from multiple devices:
+
+```bash
+# Work laptop
+export MCP_API_KEY="sk-work-laptop"
+
+# Home desktop
+export MCP_API_KEY="sk-home-desktop"
+
+# Both connect to: https://mcp.your-domain.com/mcp
+```
+
+### CI/CD Integration
+
+Use MCP tools in your automation:
+
+```python
+# In your CI/CD pipeline
+import os
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
+
+client = Client(
+    transport=StreamableHttpTransport(
+        url=os.getenv("MCP_ENDPOINT"),
+        headers={"Authorization": f"Bearer {os.getenv('MCP_API_KEY')}"}
+    )
+)
+
+async with client:
+    # Use MCP tools in your automation
+    result = await client.call_tool("git:commit", {"message": "Deploy"})
 ```
 
 ## Troubleshooting
 
-### "There was an error connecting to your server. Please check your server URL and make sure your server handles auth correctly."
+### Connection Issues
 
-**Cause:** DCR (Dynamic Client Registration) failed, usually due to:
-- Invalid Auth0 credentials
-- Missing or incorrect `MCP_BASE_URL`
-- Auth0 domain doesn't match configuration
-
-**Solution:**
-1. Verify Auth0 credentials in `.env`
-2. Check `MCP_BASE_URL` matches your actual domain
-3. Check server logs: `docker logs mcp-proxy`
-
-### "Unauthorized" (401) on MCP requests
-
-**Cause:** OAuth token validation failed
-
-**Solutions:**
-1. Verify user email is in `/data/users.json`
-2. Check Auth0 domain and JWKS endpoint are reachable
-3. Ensure JWT token hasn't expired
-4. Check server logs for validation errors
-
-### "Connection refused"
-
-**Cause:** Server not running or port not accessible
-
-**Solutions:**
-1. Check container status: `docker-compose ps`
-2. View logs: `docker-compose logs -f mcp-proxy`
-3. Verify port is exposed: `docker ps | grep mcp-proxy`
-4. Check firewall rules
-
-### Tools not showing in Claude
-
-**Cause:** Server responding but tools not listed
-
-**Solutions:**
-1. Verify `mcp_config.json` is valid JSON
-2. Check MCP servers are actually running: `docker logs mcp-proxy`
-3. Verify server configuration paths exist
-4. Check network connectivity to remote servers (if using SSE/HTTP servers)
-5. Wait 10-15 seconds for MCP servers to initialize (npm/npx servers take time)
-
-## Environment Variables Reference
-
-### Quick Setup Template
-
+**Check if proxy is running:**
 ```bash
-# Auth0 (from https://manage.auth0.com)
-AUTH0_CLIENT_ID=
-AUTH0_CLIENT_SECRET=
-AUTH0_DOMAIN=
-AUTH0_AUDIENCE=
-
-# MCP Proxy
-MCP_AUTH_PROVIDER=oauth_proxy
-MCP_BASE_URL=
-MCP_USERS_PATH=/data/users.json
-MCP_AUTH_CONFIG_PATH=/data/auth_config.json
-
-# Optional
-MCP_LIVE_RELOAD=true
+curl http://localhost:8080/health
 ```
 
-## Versioning
+**Check authentication:**
+```bash
+curl -H "Authorization: Bearer sk-your-key" http://localhost:8080/health
+```
 
-This project uses automatic semantic versioning:
+**View logs:**
+```bash
+docker logs mcp-proxy
+```
 
-- **Format:** `Major.Minor.Patch` (e.g., `1.0.5`)
-- **Patch auto-increments** on each push to main
-- **Manual bumps** for major/minor releases
+### Common Errors
 
-## License
+**401 Unauthorized:**
+- Check your API key is correct
+- Ensure `Authorization: Bearer sk-your-key` header is set
+- Verify API key is configured in `MCP_API_KEYS` or `MCP_API_KEYS_PATH`
 
-MIT License - see LICENSE file for details
+**Server not starting:**
+- Check `mcp_config.json` is valid JSON
+- Ensure all required environment variables are set
+- Check port 8080 is not already in use
 
-## Support
+**Tools not loading:**
+- Verify MCP server commands are correct in `mcp_config.json`
+- Check server logs for startup errors
+- Ensure required dependencies (npx, uvx) are available in the container
 
-- **Issues:** GitHub Issues for bug reports and feature requests
-- **Discussions:** GitHub Discussions for questions and ideas
-- **Backlog:** See `docs/BACKLOG.md` for planned improvements
+## Security Best Practices
+
+1. **Use strong API keys:**
+   ```bash
+   # Generate secure random keys
+   openssl rand -hex 32  # 64 character key
+   ```
+
+2. **Rotate keys regularly:**
+   - Update `MCP_API_KEYS` periodically
+   - Use different keys for different clients
+
+3. **Use HTTPS in production:**
+   - Deploy behind Cloudflare Tunnel, nginx, or load balancer
+   - Never expose unencrypted HTTP publicly
+
+4. **Limit network exposure:**
+   - Use firewall rules to restrict access
+   - Deploy in private network when possible
+
+5. **Monitor access:**
+   - Check logs regularly for unauthorized attempts
+   - Each API key has a client_id for tracking
+
+## Development
+
+### Building from Source
+
+```bash
+git clone https://github.com/jonhearsch/mcp-proxy.git
+cd mcp-proxy
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run locally
+python proxy_server.py
+```
+
+### Running Tests
+
+```bash
+# TODO: Add test suite
+pytest
+```
+
+### Building Docker Image
+
+```bash
+docker build -t mcp-proxy .
+```
 
 ## Contributing
 
@@ -660,83 +576,35 @@ Contributions welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+4. Submit a pull request
 
-## Use Cases for Remote MCP Access
+## Roadmap
 
-### 1. **Remote Work & Travel**
-Access your development tools, databases, and file systems from anywhere using Claude AI - coffee shop, coworking space, or home office.
+- [ ] User whitelist enforcement
+- [ ] Rate limiting per API key
+- [ ] Metrics and monitoring dashboard
+- [ ] WebSocket transport support
+- [ ] Tool-level access control
 
-### 2. **Team Collaboration**
-Share MCP servers across your team. One deployment, multiple users, granular permissions.
+## Version History
 
-### 3. **Multi-Device Workflows**
-Start a conversation on your laptop, continue on desktop, check on mobile - same tools, different devices.
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
-### 4. **Cloud-Native Development**
-Host MCP servers in your cloud environment (AWS, GCP, Azure) and access via Claude from anywhere.
+**OAuth Support:** If you need OAuth 2.1 authentication (Auth0, Keycloak, Okta), see tag `v2.0-oauth` for the OAuth implementation.
 
-### 5. **Centralized Tool Management**
-Update MCP server configurations once, all team members get changes instantly (with live reload).
+## License
 
-### 6. **Home Lab Access**
-Run MCP servers on home infrastructure, access remotely via Cloudflare Tunnel - no VPS costs.
+MIT License - see [LICENSE](LICENSE) for details.
 
-### 7. **LibreChat Python MCP Support**
-Bypass LibreChat's Python MCP server limitations - run `uvx` based servers remotely and connect via `streamable-http`.
+## Support
 
----
+- **Issues**: https://github.com/jonhearsch/mcp-proxy/issues
+- **Discussions**: https://github.com/jonhearsch/mcp-proxy/discussions
 
-## Common Questions (SEO FAQ)
+## Acknowledgments
 
-**Q: Can Claude AI access remote MCP servers?**
-A: Yes, using MCP Proxy. Deploy this server to make any MCP server remotely accessible to Claude Desktop or Web.
-
-**Q: How do I use MCP servers from outside localhost?**
-A: MCP Proxy acts as a gateway - deploy it with Docker, point Claude to your remote URL, authenticate via OAuth.
-
-**Q: Can I use Claude AI MCP tools from different computers?**
-A: Yes! Once MCP Proxy is deployed remotely, any device with Claude (desktop/web) can connect using the same URL.
-
-**Q: How do I share MCP servers with my team?**
-A: Deploy MCP Proxy to a remote server, add team members to `users.json`, they authenticate and get access.
-
-**Q: Does this work with Claude Desktop and Claude Web?**
-A: Yes, both. Any client supporting MCP Connectors API works with MCP Proxy.
-
-**Q: Can I deploy MCP servers to the cloud?**
-A: Yes, MCP Proxy runs on Docker - deploy to AWS, GCP, DigitalOcean, Railway, Render, or any hosting platform.
-
-**Q: Can I use a different OAuth provider besides Auth0?**
-A: Yes! MCP Proxy supports Auth0, Keycloak, Okta, and any generic OIDC provider. See [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md) for setup guides.
-
-**Q: How do I switch from Auth0 to Keycloak/Okta?**
-A: Just update `/data/auth_config.json` with your new provider config. No code changes needed. See [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md) for examples.
-
-**Q: Does this work with LibreChat?**
-A: Yes! Use `type: streamable-http` in your LibreChat config. MCP Proxy solves LibreChat's Python MCP server compatibility issues by running them remotely.
-
-**Q: How do I use Python MCP servers with LibreChat?**
-A: LibreChat can't run Python MCP servers locally (`uvx` fails). Use MCP Proxy to host them remotely, then connect LibreChat via `streamable-http`.
+Built with [FastMCP](https://github.com/jlowin/fastmcp) by [@jlowin](https://github.com/jlowin)
 
 ---
 
-## Related Resources
-
-### Core Documentation
-- [OAuth Provider Configuration](docs/AUTH_PROVIDERS.md) - **Configure Auth0, Keycloak, Okta, or generic OIDC**
-- [Model Context Protocol (MCP) Specification](https://modelcontextprotocol.io) - Official MCP protocol docs
-- [FastMCP Documentation](https://gofastmcp.com) - Python framework powering this proxy
-- [Claude AI MCP Documentation](https://docs.anthropic.com/claude/docs/model-context-protocol) - How Claude uses MCP
-
-### MCP Client Integration
-- [LibreChat MCP Documentation](https://www.librechat.ai/docs/features/mcp) - Configure LibreChat with MCP Proxy
-- [Claude Desktop](https://claude.ai) - Official Claude AI desktop app with MCP support
-- [Claude Web](https://claude.ai) - Use Claude AI from any browser
-
-### Provider Setup Guides
-- [Auth0 Documentation](https://auth0.com/docs) - Auth0 setup and configuration
-- [Keycloak Documentation](https://www.keycloak.org/documentation) - Open-source identity platform
-- [Okta Documentation](https://developer.okta.com/docs/) - Enterprise identity setup
-- [Cloudflare Tunnel Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) - Free remote access setup
+**Made with ❤️ for the MCP community**
