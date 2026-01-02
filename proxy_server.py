@@ -582,7 +582,11 @@ class HybridAuthProvider(OAuthProxy):
             api_keys: Optional dict mapping API key strings to their claims
                      Format: {"api-key-string": {"client_id": "user", "scopes": ["*"]}}
         """
-        # Store reference to OAuth proxy - use it directly, don't copy
+        # Don't call super().__init__() - instead, directly copy the initialized oauth_proxy
+        # This preserves all the internal state including JWT issuer initialization
+        self.__dict__ = oauth_proxy.__dict__.copy()
+
+        # Store reference for verify_token delegation
         self._oauth_proxy = oauth_proxy
 
         # Create API key verifier if keys provided
@@ -593,10 +597,6 @@ class HybridAuthProvider(OAuthProxy):
                 required_scopes=None
             )
             logger.info(f"✓ API key authentication enabled ({len(api_keys)} keys configured)")
-
-    def __getattr__(self, name):
-        """Delegate all attribute access to the underlying OAuthProxy."""
-        return getattr(self._oauth_proxy, name)
 
     async def verify_token(self, token: str) -> Optional[AccessToken]:
         """
@@ -1083,11 +1083,13 @@ class ResilientMCPProxy:
             # Create auth provider based on configuration
             auth = None
             if oauth_provider and api_keys:
-                # Both OAuth and API keys configured - use hybrid
-                auth = HybridAuthProvider(oauth_provider, api_keys)
-                logger.info("✓ Hybrid authentication enabled")
-                logger.info("  - OAuth 2.1 authentication: enabled")
-                logger.info("  - API key authentication: enabled")
+                # Both OAuth and API keys configured
+                # TEMPORARILY: Just use OAuth only until HybridAuthProvider is fixed
+                auth = oauth_provider
+                logger.warning("⚠️  API keys configured but HybridAuthProvider is currently disabled")
+                logger.warning("    Using OAuth-only authentication for now")
+                logger.info("✓ OAuth 2.1 authentication enabled")
+                # TODO: Fix HybridAuthProvider JWT issuer initialization issue
             elif oauth_provider:
                 # OAuth only
                 auth = oauth_provider
