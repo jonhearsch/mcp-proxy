@@ -140,6 +140,8 @@ logger = logging.getLogger(__name__)
 
 # Configure loggers for common libraries (will be overridden by MCP_LOG_LEVELS if specified)
 logging.getLogger("fastmcp").setLevel(logging.INFO)
+logging.getLogger("fastmcp.auth").setLevel(logging.DEBUG)  # Enable auth debug logging
+logging.getLogger("fastmcp.server.auth").setLevel(logging.DEBUG)  # Enable auth debug logging
 logging.getLogger("httpx").setLevel(logging.INFO)
 
 # Log .env file loading
