@@ -9,9 +9,11 @@ services:
       - ./mcp_config.json:/app/mcp_config.json:ro
       - ./data:/data
     environment:
-      # REQUIRED: Bearer token for authentication
-      # Generate with: openssl rand -hex 32
-      - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN:-changeme-please-set-a-secure-token}
+      # REQUIRED: Google OAuth credentials
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_JWT_KEY=${GOOGLE_JWT_KEY}
+      - MCP_BASE_URL=${MCP_BASE_URL:-http://localhost:8080}
 
       # Optional: Configuration
       - MCP_CONFIG_PATH=/app/mcp_config.json
@@ -25,9 +27,6 @@ services:
       - MCP_LIVE_RELOAD=false
       - MCP_MAX_RETRIES=3
       - MCP_RESTART_DELAY=5
-
-      # Optional: Disable auth (NOT RECOMMENDED)
-      # - MCP_DISABLE_AUTH=true
     restart: unless-stopped
     healthcheck:
       test:

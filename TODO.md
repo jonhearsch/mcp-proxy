@@ -4,33 +4,29 @@
 
 **Status**: Not Implemented
 **Priority**: Medium
-**Tracking**: See inline TODO comments in code
+**Tracking**: Future enhancement for Google OAuth implementation
 
 ### Current State
-- `load_users()` function exists but is never called
-- `/data/users.json` format is defined and documented
-- Access control currently happens only at OAuth provider level (Auth0/Keycloak)
+- Uses FastMCP's GoogleProvider for authentication
+- `/data/users.json` format could be used for whitelist (not yet implemented)
+- Access control currently happens at Google OAuth level
+- User identity tracked via Google email claims
 
 ### Implementation Plan
 
 1. **Load users.json at startup**
-   - Call `load_users()` in `create_proxy()`
-   - Store allowed users in `HybridAuthProvider`
+   - Create whitelist loading function
+   - Store allowed users in proxy server state
 
-2. **Enforce whitelist in token verification**
-   - Location: `HybridAuthProvider.verify_token()` (proxy_server.py:598)
-   - After successful token verification, check if user is in whitelist
-   - Extract user identifier from token claims (email or client_id)
+2. **Enforce whitelist in auth middleware**
+   - After successful Google OAuth verification, check user email against whitelist
+   - Extract email from Google token claims
    - Reject tokens for users not in whitelist
 
-3. **Handle OAuth JWT claims**
-   - Auth0 tokens include `sub` (subject), `email`, or custom claims
-   - Keycloak tokens may use `preferred_username` or `email`
-   - Need to support configurable claim field for user matching
-
-4. **Handle API keys**
-   - Decide if API keys should also check whitelist
-   - Currently API keys have their own client_id mapping
+3. **Handle Google OAuth JWT claims**
+   - Google tokens include `email`, `email_verified`, and `sub` claims
+   - Use verified email as primary user identifier
+   - Consider supporting domain-based whitelisting (e.g., @company.com)
 
 ### Code References
 
