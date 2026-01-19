@@ -2,34 +2,38 @@
 MCP Proxy Server - A resilient proxy server for Model Context Protocol (MCP) servers.
 
 This module provides a robust proxy server that can manage multiple MCP servers
-through a single FastMCP endpoint. It includes features like:
+through a single FastMCP endpoint with Google OAuth authentication. Features:
 
-- Automatic restart on crashes
-- Live configuration reloading
-- Graceful shutdown handling
-- File system monitoring for config changes
-- Retry logic with exponential backoff
-- Port availability checking
-- Hybrid authentication (OAuth + API keys)
+- Automatic restart on crashes with exponential backoff
+- Live configuration reloading via file system monitoring
+- Graceful shutdown handling (SIGTERM, SIGINT)
+- Port availability checking before restart
+- Google OAuth 2.0 authentication (Claude.ai compatible)
+- Multi-transport support (stdio, SSE, HTTP)
 
 Environment Variables:
-    MCP_CONFIG_PATH: Path to configuration file (default: mcp_config.json)
-    MCP_MAX_RETRIES: Maximum config load retries (default: 3)
-    MCP_RESTART_DELAY: Initial restart delay in seconds (default: 5)
+    # Google OAuth (Required)
+    GOOGLE_CLIENT_ID: OAuth 2.0 Client ID from Google Cloud Console
+    GOOGLE_CLIENT_SECRET: OAuth 2.0 Client Secret
+    MCP_BASE_URL: Public URL for OAuth callbacks
+    GOOGLE_JWT_KEY: JWT signing key (optional, recommended for production)
+
+    # MCP Proxy Configuration
+    MCP_CONFIG_PATH: Path to MCP servers config (default: mcp_config.json)
+    MCP_HOST: Server bind address (default: 0.0.0.0)
+    MCP_PORT: Server bind port (default: 8080)
     MCP_LIVE_RELOAD: Enable live config reloading (default: false)
-    MCP_PATH_PREFIX: Custom path prefix for MCP endpoint (default: none, endpoint at /mcp/)
-    MCP_AUTH_PROVIDER: Auth provider type (set to 'oauth_proxy' for OAuth)
-    MCP_API_KEYS: API keys for service accounts (format: "key1:client1,key2:client2")
-    MCP_API_KEYS_PATH: Path to API keys JSON file (alternative to MCP_API_KEYS)
-    MCP_DISABLE_AUTH: Disable authentication (NOT RECOMMENDED, default: false)
+    MCP_PATH_PREFIX: Custom path prefix for MCP endpoint (default: none)
+
+    # Server Resilience
+    MCP_MAX_RETRIES: Config load retry attempts (default: 3)
+    MCP_RESTART_DELAY: Initial restart delay in seconds (default: 5)
 """
 
 # Core libraries
 
 from fastmcp import FastMCP
-from fastmcp.server.auth import OAuthProxy, AccessToken, TokenVerifier
-from fastmcp.server.auth.providers.jwt import JWTVerifier, StaticTokenVerifier
-from pydantic import AnyHttpUrl
+from fastmcp.server.auth.providers.google import GoogleProvider
 from starlette.responses import JSONResponse
 
 import os
@@ -42,7 +46,7 @@ import threading
 import socket
 import re
 from pathlib import Path
-from typing import Optional, Any, Dict, List, Union
+from typing import Optional, Any, Dict, List
 
 # Load .env file if it exists
 try:
@@ -157,597 +161,64 @@ except ImportError:
     logger.info("python-dotenv not installed - using environment variables directly")
 
 
-def load_users() -> Dict[str, Any]:
+
+
+
+
+def create_google_auth() -> Optional[GoogleProvider]:
     """
-    Load authorized users from users.json.
+    Create Google OAuth provider for Claude.ai integration.
 
-    TODO: This function is defined but not currently enforced!
-    User whitelisting needs to be implemented in HybridAuthProvider.verify_token()
-    to check if the authenticated user's email/client_id is in the allowed users list.
+    Supports any OIDC-compliant provider via Google Cloud OAuth.
+    Claude.ai requires OAuth with DCR support, which FastMCP's GoogleProvider handles.
 
-    For now, access control happens at the OAuth provider level (Auth0/Keycloak).
-    """
-    users_path = os.getenv("MCP_USERS_PATH", "/data/users.json")
-    abs_path = os.path.abspath(users_path)
-    try:
-        with open(users_path, 'r') as f:
-            users = json.load(f)
-            user_count = len(users)
-            user_emails = ", ".join(users.keys())
-            logger.info(f"✓ Loaded users.json from {abs_path}")
-            logger.info(f"  Users: {user_emails} ({user_count} total)")
-            return users
-    except FileNotFoundError:
-        logger.error(f"✗ users.json NOT FOUND at {abs_path}")
-        logger.error(f"  MCP_USERS_PATH={users_path}")
-        return {}
-    except json.JSONDecodeError as e:
-        logger.error(f"✗ Invalid JSON in users.json at {abs_path}: {e}")
-        return {}
-
-
-def load_auth_config() -> Optional[Dict[str, Any]]:
-    """
-    Load authentication configuration from auth_config.json.
-    Supports environment variable expansion in config values.
+    Environment Variables:
+        GOOGLE_CLIENT_ID: OAuth 2.0 Client ID from Google Cloud Console
+        GOOGLE_CLIENT_SECRET: OAuth 2.0 Client Secret
+        MCP_BASE_URL: Public URL of this proxy (for OAuth callback)
+        GOOGLE_JWT_KEY: JWT signing key (optional, recommended for production)
 
     Returns:
-        Dict containing provider config, or None if file not found or invalid
+        GoogleProvider instance or None if not configured
     """
-    auth_config_path = os.getenv("MCP_AUTH_CONFIG_PATH", "/data/auth_config.json")
-    abs_path = os.path.abspath(auth_config_path)
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    base_url = os.getenv("MCP_BASE_URL")
+    jwt_key = os.getenv("GOOGLE_JWT_KEY")
+
+    if not all([client_id, client_secret, base_url]):
+        return None
+
+    logger.info("Google OAuth Configuration:")
+    logger.info(f"  Client ID: {'*' * 8 + (client_id[-8:] if client_id and len(client_id) > 8 else 'INVALID')}")
+    logger.info(f"  Client Secret: {'***REDACTED***' if client_secret else 'MISSING'}")
+    logger.info(f"  Base URL: {base_url}")
+    logger.info(f"  JWT Key: {'***CONFIGURED***' if jwt_key else 'not set (dev mode)'}")
 
     try:
-        with open(auth_config_path, 'r') as f:
-            raw_config = json.load(f)
+        auth = GoogleProvider(
+            client_id=client_id,
+            client_secret=client_secret,
+            base_url=base_url,
+            required_scopes=[
+                "openid",
+                "https://www.googleapis.com/auth/userinfo.email",
+            ],
+            jwt_signing_key=jwt_key if jwt_key else None,
+        )
 
-        # Expand environment variables in the auth config
-        config = expand_env_vars(raw_config)
-
-        logger.info(f"✓ Loaded auth_config.json from {abs_path}")
-        logger.info(f"  Provider: {config.get('provider', 'unknown')}")
-
-        return config
-
-    except FileNotFoundError:
-        logger.warning(f"auth_config.json not found at {abs_path}")
-        return None
-    except json.JSONDecodeError as e:
-        logger.error(f"✗ Invalid JSON in auth_config.json at {abs_path}: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"✗ Failed to load auth_config.json: {e}")
-        return None
-
-
-def create_auth_provider() -> Optional[OAuthProxy]:
-    """
-    Create OAuthProxy from auth_config.json or environment variables.
-
-    Supports multiple OAuth 2.1 providers:
-    - Auth0
-    - Keycloak
-    - Okta
-    - Generic OIDC (any compliant provider)
-
-    Configuration priority:
-    1. auth_config.json (if exists)
-    2. Environment variables (legacy Auth0 support)
-    """
-    auth_provider_type = os.getenv("MCP_AUTH_PROVIDER", "").lower()
-
-    logger.info(f"Auth provider type: {auth_provider_type if auth_provider_type else '(not set)'}")
-
-    if auth_provider_type != "oauth_proxy":
-        if auth_provider_type:
-            logger.info(f"OAuth not enabled (MCP_AUTH_PROVIDER={auth_provider_type}, expected 'oauth_proxy')")
-        return None
-
-    # Get base URL (required for all providers)
-    mcp_base_url = os.getenv("MCP_BASE_URL")
-    if not mcp_base_url:
-        logger.error("✗ MCP_BASE_URL is required for OAuth authentication")
-        return None
-
-    try:
-        # Try loading from auth_config.json first
-        auth_config = load_auth_config()
-
-        if auth_config:
-            return _create_from_config(auth_config, mcp_base_url)
-        else:
-            # Fallback to legacy Auth0 environment variables
-            logger.info("No auth_config.json found, checking for legacy Auth0 environment variables...")
-            return _create_auth0_from_env(mcp_base_url)
+        logger.info("✓ GoogleProvider successfully initialized")
+        return auth
 
     except Exception as e:
-        logger.error(f"✗ Failed to create OAuthProxy: {e}", exc_info=True)
+        logger.error(f"✗ Failed to create GoogleProvider: {e}", exc_info=True)
         return None
 
 
-def _create_from_config(auth_config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
-    """Create OAuthProxy from auth_config.json configuration."""
-    provider = auth_config.get("provider", "").lower()
 
-    logger.info(f"Configuring OAuth for provider: {provider}")
 
-    if provider == "auth0":
-        return _create_auth0_provider(auth_config.get("auth0", {}), mcp_base_url)
-    elif provider == "keycloak":
-        return _create_keycloak_provider(auth_config.get("keycloak", {}), mcp_base_url)
-    elif provider == "okta":
-        return _create_okta_provider(auth_config.get("okta", {}), mcp_base_url)
-    elif provider == "generic_oidc" or provider == "oidc":
-        return _create_generic_oidc_provider(auth_config.get("generic_oidc", {}), mcp_base_url)
-    else:
-        logger.error(f"✗ Unsupported provider: {provider}")
-        logger.error("  Supported providers: auth0, keycloak, okta, generic_oidc")
-        return None
 
 
-def _create_auth0_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
-    """Create OAuthProxy for Auth0."""
-    domain = config.get("domain")
-    audience = config.get("audience")
-    client_id = config.get("client_id") or os.getenv("AUTH0_CLIENT_ID")
-    client_secret = config.get("client_secret") or os.getenv("AUTH0_CLIENT_SECRET")
-
-    logger.info("Auth0 Configuration:")
-    logger.info(f"  Domain: {domain}")
-    logger.info(f"  Audience: {audience}")
-    logger.info(f"  Client ID: {'*' * 8 + (client_id[-8:] if client_id else 'MISSING')}")
-    logger.info(f"  Client Secret: {'***REDACTED***' if client_secret else 'MISSING'}")
-    logger.info(f"  Base URL: {mcp_base_url}")
-
-    if not all([domain, audience, client_id, client_secret]):
-        missing = []
-        if not domain: missing.append("domain")
-        if not audience: missing.append("audience")
-        if not client_id: missing.append("client_id")
-        if not client_secret: missing.append("client_secret")
-        logger.error(f"✗ Missing required Auth0 configuration: {', '.join(missing)}")
-        return None
-
-    # Configure JWT token validation using Auth0's JWKS
-    token_verifier = JWTVerifier(
-        jwks_uri=config.get("jwks_uri", f"https://{domain}/.well-known/jwks.json"),
-        issuer=config.get("issuer", f"https://{domain}/"),
-        audience=audience
-    )
-
-    logger.info("✓ JWTVerifier configured")
-    logger.info(f"  JWKS URI: {token_verifier.jwks_uri}")
-    logger.info(f"  Issuer: {token_verifier.issuer}")
-
-    # Auth0 requires audience parameter for JWT issuance
-    auth = OAuthProxy(
-        upstream_authorization_endpoint=config.get("authorization_endpoint", f"https://{domain}/authorize"),
-        upstream_token_endpoint=config.get("token_endpoint", f"https://{domain}/oauth/token"),
-        upstream_client_id=client_id,
-        upstream_client_secret=client_secret,
-        token_verifier=token_verifier,
-        base_url=AnyHttpUrl(mcp_base_url),
-        extra_authorize_params={"audience": audience},
-        extra_token_params={"audience": audience},
-        valid_scopes=["openid", "profile", "email"]
-    )
-
-    logger.info("✓ OAuthProxy successfully initialized with Auth0")
-    return auth
-
-
-def _create_keycloak_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
-    """Create OAuthProxy for Keycloak."""
-    server_url = config.get("server_url")
-    realm = config.get("realm")
-    client_id = config.get("client_id")
-    client_secret = config.get("client_secret")
-
-    logger.info("Keycloak Configuration:")
-    logger.info(f"  Server URL: {server_url}")
-    logger.info(f"  Realm: {realm}")
-    logger.info(f"  Client ID: {client_id}")
-    logger.info(f"  Client Secret: {'***REDACTED***' if client_secret else 'MISSING'}")
-
-    if not all([server_url, realm, client_id, client_secret]):
-        missing = []
-        if not server_url: missing.append("server_url")
-        if not realm: missing.append("realm")
-        if not client_id: missing.append("client_id")
-        if not client_secret: missing.append("client_secret")
-        logger.error(f"✗ Missing required Keycloak configuration: {', '.join(missing)}")
-        return None
-
-    # Build Keycloak endpoints
-    base = f"{server_url}/realms/{realm}"
-    auth_endpoint = config.get("authorization_endpoint", f"{base}/protocol/openid-connect/auth")
-    token_endpoint = config.get("token_endpoint", f"{base}/protocol/openid-connect/token")
-    jwks_uri = config.get("jwks_uri", f"{base}/protocol/openid-connect/certs")
-    issuer = config.get("issuer", base)
-
-    token_verifier = JWTVerifier(
-        jwks_uri=jwks_uri,
-        issuer=issuer,
-        audience=client_id  # Keycloak uses client_id as audience
-    )
-
-    logger.info("✓ JWTVerifier configured")
-    logger.info(f"  JWKS URI: {jwks_uri}")
-    logger.info(f"  Issuer: {issuer}")
-
-    auth = OAuthProxy(
-        upstream_authorization_endpoint=auth_endpoint,
-        upstream_token_endpoint=token_endpoint,
-        upstream_client_id=client_id,
-        upstream_client_secret=client_secret,
-        token_verifier=token_verifier,
-        base_url=AnyHttpUrl(mcp_base_url),
-        extra_authorize_params=config.get("extra_authorize_params", {}),
-        extra_token_params=config.get("extra_token_params", {}),
-        valid_scopes=["openid", "profile", "email"]
-    )
-
-    logger.info("✓ OAuthProxy successfully initialized with Keycloak")
-    return auth
-
-
-def _create_okta_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
-    """Create OAuthProxy for Okta."""
-    domain = config.get("domain")
-    client_id = config.get("client_id")
-    client_secret = config.get("client_secret")
-
-    logger.info("Okta Configuration:")
-    logger.info(f"  Domain: {domain}")
-    logger.info(f"  Client ID: {client_id}")
-    logger.info(f"  Client Secret: {'***REDACTED***' if client_secret else 'MISSING'}")
-
-    if not all([domain, client_id, client_secret]):
-        missing = []
-        if not domain: missing.append("domain")
-        if not client_id: missing.append("client_id")
-        if not client_secret: missing.append("client_secret")
-        logger.error(f"✗ Missing required Okta configuration: {', '.join(missing)}")
-        return None
-
-    # Build Okta endpoints
-    auth_endpoint = config.get("authorization_endpoint", f"https://{domain}/oauth2/v1/authorize")
-    token_endpoint = config.get("token_endpoint", f"https://{domain}/oauth2/v1/token")
-    jwks_uri = config.get("jwks_uri", f"https://{domain}/oauth2/v1/keys")
-    issuer = config.get("issuer", f"https://{domain}")
-    audience = config.get("audience", "api://default")
-
-    token_verifier = JWTVerifier(
-        jwks_uri=jwks_uri,
-        issuer=issuer,
-        audience=audience
-    )
-
-    logger.info("✓ JWTVerifier configured")
-    logger.info(f"  JWKS URI: {jwks_uri}")
-    logger.info(f"  Issuer: {issuer}")
-
-    auth = OAuthProxy(
-        upstream_authorization_endpoint=auth_endpoint,
-        upstream_token_endpoint=token_endpoint,
-        upstream_client_id=client_id,
-        upstream_client_secret=client_secret,
-        token_verifier=token_verifier,
-        base_url=AnyHttpUrl(mcp_base_url),
-        extra_authorize_params=config.get("extra_authorize_params", {}),
-        extra_token_params=config.get("extra_token_params", {}),
-        valid_scopes=["openid", "profile", "email"]
-    )
-
-    logger.info("✓ OAuthProxy successfully initialized with Okta")
-    return auth
-
-
-def _create_generic_oidc_provider(config: Dict[str, Any], mcp_base_url: str) -> Optional[OAuthProxy]:
-    """Create OAuthProxy for any generic OIDC-compliant provider."""
-    auth_endpoint = config.get("authorization_endpoint")
-    token_endpoint = config.get("token_endpoint")
-    jwks_uri = config.get("jwks_uri")
-    issuer = config.get("issuer")
-    client_id = config.get("client_id")
-    client_secret = config.get("client_secret")
-    audience = config.get("audience", client_id)
-
-    logger.info("Generic OIDC Configuration:")
-    logger.info(f"  Authorization Endpoint: {auth_endpoint}")
-    logger.info(f"  Token Endpoint: {token_endpoint}")
-    logger.info(f"  JWKS URI: {jwks_uri}")
-    logger.info(f"  Issuer: {issuer}")
-    logger.info(f"  Client ID: {client_id}")
-    logger.info(f"  Audience: {audience}")
-
-    if not all([auth_endpoint, token_endpoint, jwks_uri, issuer, client_id, client_secret]):
-        missing = []
-        if not auth_endpoint: missing.append("authorization_endpoint")
-        if not token_endpoint: missing.append("token_endpoint")
-        if not jwks_uri: missing.append("jwks_uri")
-        if not issuer: missing.append("issuer")
-        if not client_id: missing.append("client_id")
-        if not client_secret: missing.append("client_secret")
-        logger.error(f"✗ Missing required OIDC configuration: {', '.join(missing)}")
-        return None
-
-    token_verifier = JWTVerifier(
-        jwks_uri=jwks_uri,
-        issuer=issuer,
-        audience=audience
-    )
-
-    logger.info("✓ JWTVerifier configured")
-
-    auth = OAuthProxy(
-        upstream_authorization_endpoint=auth_endpoint,
-        upstream_token_endpoint=token_endpoint,
-        upstream_client_id=client_id,
-        upstream_client_secret=client_secret,
-        token_verifier=token_verifier,
-        base_url=AnyHttpUrl(mcp_base_url),
-        extra_authorize_params=config.get("extra_authorize_params", {}),
-        extra_token_params=config.get("extra_token_params", {}),
-        valid_scopes=config.get("valid_scopes", ["openid", "profile", "email"])
-    )
-
-    logger.info("✓ OAuthProxy successfully initialized with Generic OIDC")
-    return auth
-
-
-def _create_auth0_from_env(mcp_base_url: str) -> Optional[OAuthProxy]:
-    """Legacy: Create OAuthProxy from Auth0 environment variables."""
-    auth0_domain = os.getenv("AUTH0_DOMAIN")
-    auth0_audience = os.getenv("AUTH0_AUDIENCE")
-    auth0_client_id = os.getenv("AUTH0_CLIENT_ID")
-    auth0_client_secret = os.getenv("AUTH0_CLIENT_SECRET")
-
-    logger.info("Auth0 Configuration (from environment):")
-    logger.info(f"  AUTH0_DOMAIN={auth0_domain}")
-    logger.info(f"  AUTH0_AUDIENCE={auth0_audience}")
-    logger.info(f"  AUTH0_CLIENT_ID={'*' * 8 + (auth0_client_id[-8:] if auth0_client_id else 'MISSING')}")
-    logger.info(f"  AUTH0_CLIENT_SECRET={'***REDACTED***' if auth0_client_secret else 'MISSING'}")
-    logger.info(f"  MCP_BASE_URL={mcp_base_url}")
-
-    if not all([auth0_domain, auth0_audience, auth0_client_id, auth0_client_secret]):
-        missing = []
-        if not auth0_domain: missing.append("AUTH0_DOMAIN")
-        if not auth0_audience: missing.append("AUTH0_AUDIENCE")
-        if not auth0_client_id: missing.append("AUTH0_CLIENT_ID")
-        if not auth0_client_secret: missing.append("AUTH0_CLIENT_SECRET")
-        logger.error(f"✗ Missing required Auth0 configuration: {', '.join(missing)}")
-        return None
-
-    logger.info("✓ All Auth0 environment variables present")
-
-    # Configure JWT token validation using Auth0's JWKS
-    token_verifier = JWTVerifier(
-        jwks_uri=f"https://{auth0_domain}/.well-known/jwks.json",
-        issuer=f"https://{auth0_domain}/",
-        audience=auth0_audience
-    )
-    logger.info(f"✓ JWTVerifier configured")
-    logger.info(f"  JWKS URI: https://{auth0_domain}/.well-known/jwks.json")
-    logger.info(f"  Issuer: https://{auth0_domain}/")
-
-    # Create OAuth Proxy wrapping Auth0
-    auth = OAuthProxy(
-        upstream_authorization_endpoint=f"https://{auth0_domain}/authorize",
-        upstream_token_endpoint=f"https://{auth0_domain}/oauth/token",
-        upstream_client_id=auth0_client_id,
-        upstream_client_secret=auth0_client_secret,
-        token_verifier=token_verifier,
-        base_url=AnyHttpUrl(mcp_base_url),
-        extra_authorize_params={"audience": auth0_audience},
-        extra_token_params={"audience": auth0_audience},
-        valid_scopes=["openid", "profile", "email"]
-    )
-
-    logger.info("✓ OAuthProxy successfully initialized with Auth0 (legacy env vars)")
-    return auth
-
-
-class HybridAuthProvider(OAuthProxy):
-    """
-    Hybrid authentication provider supporting both OAuth 2.1 and API keys.
-
-    This provider wraps OAuthProxy to add API key fallback authentication.
-    When both OAuth and API keys are configured, it:
-    1. Provides full OAuth 2.1 endpoints (DCR, authorize, token, etc.)
-    2. Falls back to API key validation if OAuth token verification fails
-
-    This allows:
-    - OAuth 2.1 (via OAuthProxy) for interactive users
-    - Static API keys (via StaticTokenVerifier) for service accounts and automation
-
-    Authentication is attempted in order:
-    1. OAuth JWT token validation (if OAuth configured)
-    2. Static API key validation (if API keys configured)
-
-    Usage:
-        Configure via environment variables:
-        - MCP_AUTH_PROVIDER=oauth_proxy (enables OAuth)
-        - MCP_API_KEYS="key1:client1,key2:client2" (enables API keys)
-
-        Both can be enabled simultaneously for maximum flexibility.
-    """
-
-    def __init__(self, oauth_proxy: OAuthProxy, api_keys: Optional[Dict[str, Dict[str, Any]]]):
-        """
-        Initialize hybrid authentication provider.
-
-        Args:
-            oauth_proxy: OAuthProxy instance for OAuth 2.1 authentication (required)
-            api_keys: Optional dict mapping API key strings to their claims
-                     Format: {"api-key-string": {"client_id": "user", "scopes": ["*"]}}
-        """
-        # Don't call super().__init__() - instead, directly copy the initialized oauth_proxy
-        # This preserves all the internal state including JWT issuer initialization
-        self.__dict__ = oauth_proxy.__dict__.copy()
-
-        # Store reference for verify_token delegation
-        self._oauth_proxy = oauth_proxy
-
-        # Create API key verifier if keys provided
-        self.api_key_verifier = None
-        if api_keys:
-            self.api_key_verifier = StaticTokenVerifier(
-                tokens=api_keys,
-                required_scopes=None
-            )
-            logger.info(f"✓ API key authentication enabled ({len(api_keys)} keys configured)")
-
-    async def verify_token(self, token: str) -> Optional[AccessToken]:
-        """
-        Verify authentication token using OAuth or API key validation.
-
-        Args:
-            token: Bearer token from Authorization header
-
-        Returns:
-            AccessToken with claims if valid, None otherwise
-        """
-        # Try OAuth JWT validation first using the delegated OAuthProxy
-        try:
-            result = await self._oauth_proxy.verify_token(token)
-            if result:
-                logger.debug(f"Token verified via OAuth for client: {result.client_id}")
-
-                # TODO: Implement user whitelist check here
-                # Load users.json and verify result.client_id (or custom claim for email)
-                # is in the allowed users list. If not, return None to reject the token.
-                # Example:
-                # allowed_users = load_users()
-                # if result.client_id not in allowed_users:
-                #     logger.warning(f"User {result.client_id} not in whitelist")
-                #     return None
-
-                return result
-        except Exception as e:
-            logger.debug(f"OAuth token verification failed: {e}")
-
-        # Fall back to API key validation
-        if self.api_key_verifier:
-            try:
-                result = await self.api_key_verifier.verify_token(token)
-                if result:
-                    logger.debug(f"Token verified via API key for client: {result.client_id}")
-
-                    # TODO: Optionally check API key client_id against whitelist as well
-
-                    return result
-            except Exception as e:
-                logger.debug(f"API key verification failed: {e}")
-
-        logger.debug("Token verification failed for all methods")
-        return None
-
-
-def load_api_keys() -> Optional[Dict[str, Dict[str, Any]]]:
-    """
-    Load API keys from environment variable or JSON file.
-
-    Supports two formats:
-    1. Environment variable (MCP_API_KEYS): "key1:client1,key2:client2"
-    2. JSON file (MCP_API_KEYS_PATH): {"key1": {"client_id": "client1", "scopes": ["*"]}}
-
-    Returns:
-        Dict mapping API key strings to their claims, or None if not configured
-    """
-    # Try environment variable first
-    api_keys_str = os.getenv("MCP_API_KEYS")
-    if api_keys_str:
-        api_keys = {}
-        try:
-            for entry in api_keys_str.split(","):
-                entry = entry.strip()
-                if ":" not in entry:
-                    logger.warning(f"Invalid API key entry format (missing ':'): {entry}")
-                    continue
-
-                key, client_id = entry.split(":", 1)
-                api_keys[key.strip()] = {
-                    "client_id": client_id.strip(),
-                    "scopes": ["*"]
-                }
-
-            if api_keys:
-                logger.info(f"✓ Loaded {len(api_keys)} API keys from MCP_API_KEYS")
-                logger.info(f"  Clients: {', '.join([v['client_id'] for v in api_keys.values()])}")
-                return api_keys
-        except Exception as e:
-            logger.error(f"Failed to parse MCP_API_KEYS: {e}")
-            return None
-
-    # Try JSON file
-    api_keys_path = os.getenv("MCP_API_KEYS_PATH")
-    if api_keys_path:
-        abs_path = os.path.abspath(api_keys_path)
-        try:
-            with open(api_keys_path, 'r') as f:
-                api_keys = json.load(f)
-
-            logger.info(f"✓ Loaded {len(api_keys)} API keys from {abs_path}")
-            logger.info(f"  Clients: {', '.join([v.get('client_id', 'unknown') for v in api_keys.values()])}")
-            return api_keys
-        except FileNotFoundError:
-            logger.warning(f"API keys file not found at {abs_path}")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in API keys file at {abs_path}: {e}")
-            return None
-
-    return None
-
-
-def expand_env_vars(value: Any) -> Any:
-    """
-    Recursively expand environment variables in configuration values.
-    
-    Supports ${VAR_NAME} syntax for environment variable substitution.
-    Falls back to empty string if variable is not set.
-    
-    Args:
-        value: Configuration value to expand (can be str, dict, list, or other)
-        
-    Returns:
-        Value with environment variables expanded
-        
-    Examples:
-        "${HOME}/data" -> "/home/user/data"
-        {"key": "${API_KEY}"} -> {"key": "actual-api-key-value"}
-        ["${VAR1}", "${VAR2}"] -> ["value1", "value2"]
-    """
-    if isinstance(value, str):
-        # Pattern matches ${VAR_NAME} with optional fallback ${VAR_NAME:-default}
-        def replace_var(match):
-            var_name = match.group(1)
-            default_value = match.group(2) if match.lastindex >= 2 else ""
-            env_value = os.getenv(var_name)
-            
-            if env_value is None:
-                if default_value:
-                    logger.debug(f"Environment variable ${{{var_name}}} not set, using default: {default_value}")
-                    return default_value
-                else:
-                    logger.warning(f"Environment variable ${{{var_name}}} not set, using empty string")
-                    return ""
-            
-            return env_value
-        
-        # Support both ${VAR} and ${VAR:-default} syntax
-        return re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*?)(?::-([^}]*))?\}', replace_var, value)
-    
-    elif isinstance(value, dict):
-        return {key: expand_env_vars(val) for key, val in value.items()}
-    
-    elif isinstance(value, list):
-        return [expand_env_vars(item) for item in value]
-    
-    else:
-        # Return as-is for other types (int, bool, None, etc.)
-        return value
 
 
 class ConfigFileHandler(FileSystemEventHandler):
@@ -1025,11 +496,8 @@ class ResilientMCPProxy:
 
                 # Read and parse JSON configuration
                 with open(self.config_path, 'r') as f:
-                    raw_config = json.load(f)
+                    self.config = json.load(f)
                 logger.info(f"✓ Loaded config file from {abs_config_path}")
-
-                # Expand environment variables in the config
-                self.config = expand_env_vars(raw_config)
 
                 # Validate config against schema
                 jsonschema.validate(instance=self.config, schema=schema)
@@ -1074,44 +542,20 @@ class ResilientMCPProxy:
                 logger.error("No MCP servers configured!")
                 return False
 
-            # Create OAuthProxy (or None if not configured)
-            oauth_provider = create_auth_provider()
+            # Create Google OAuth provider (required)
+            auth = create_google_auth()
 
-            # Load API keys (or None if not configured)
-            api_keys = load_api_keys()
+            if not auth:
+                logger.error("Google OAuth authentication is required but not configured.")
+                logger.error("Set these environment variables:")
+                logger.error("  - GOOGLE_CLIENT_ID: OAuth 2.0 Client ID")
+                logger.error("  - GOOGLE_CLIENT_SECRET: OAuth 2.0 Client Secret")
+                logger.error("  - MCP_BASE_URL: Public URL of this proxy")
+                logger.error("")
+                logger.error("Get credentials from: https://console.developers.google.com/")
+                return False
 
-            # Create auth provider based on configuration
-            auth = None
-            if oauth_provider and api_keys:
-                # Both OAuth and API keys configured
-                # TEMPORARILY: Just use OAuth only until HybridAuthProvider is fixed
-                auth = oauth_provider
-                logger.warning("⚠️  API keys configured but HybridAuthProvider is currently disabled")
-                logger.warning("    Using OAuth-only authentication for now")
-                logger.info("✓ OAuth 2.1 authentication enabled")
-                # TODO: Fix HybridAuthProvider JWT issuer initialization issue
-            elif oauth_provider:
-                # OAuth only
-                auth = oauth_provider
-                logger.info("✓ OAuth 2.1 authentication enabled")
-            elif api_keys:
-                # API keys only
-                auth = StaticTokenVerifier(tokens=api_keys, required_scopes=None)
-                logger.info("✓ API key authentication enabled")
-                logger.info(f"  - {len(api_keys)} API keys configured")
-            else:
-                # No authentication configured
-                disable_auth = os.getenv("MCP_DISABLE_AUTH", "false").lower() in ("true", "1", "yes")
-
-                if not disable_auth:
-                    logger.error("Authentication is required but not properly configured.")
-                    logger.error("Set either:")
-                    logger.error("  - MCP_AUTH_PROVIDER=oauth_proxy with OAuth credentials")
-                    logger.error("  - MCP_API_KEYS=key1:client1,key2:client2 for API key auth")
-                    logger.error("  - MCP_DISABLE_AUTH=true to disable (NOT RECOMMENDED)")
-                    return False
-                else:
-                    logger.warning("⚠️  WARNING: Authentication is DISABLED - server is not protected!")
+            logger.info("✓ Google OAuth authentication enabled (Claude.ai compatible)")
 
             # Create SINGLE unified FastMCP instance with all servers
             try:
