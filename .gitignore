@@ -20,8 +20,10 @@ build/
 .env.*
 !.env.example
 
-# MCP Config (may contain sensitive API keys)
+# MCP Config (may contain sensitive API keys or personal settings)
 mcp_config.json
+mcp_config_*.json
+!mcp_config.example.json
 
 # IDE
 .vscode/

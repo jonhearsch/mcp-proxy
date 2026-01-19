@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**MCP Proxy Server** is a production-ready, resilient proxy that aggregates multiple Model Context Protocol (MCP) servers through a single unified endpoint with **built-in OAuth 2.1 authentication via Auth0**.
+**MCP Proxy Server** is a production-ready, resilient proxy that aggregates multiple Model Context Protocol (MCP) servers through a single unified endpoint with **built-in Google OAuth 2.0 authentication**.
 
 **Key Features:**
-- ✅ **Claude Connector Compatible** - Works with Claude's MCP Connector API
-- 🔐 **OAuth 2.1 + PKCE** - Secure authentication with Auth0 (or any OAuth 2.1 provider)
+
+- ✅ **Claude.ai Compatible** - Native Google OAuth integration for Claude MCP support
+- 🔐 **Google OAuth 2.0** - Secure, trusted authentication via Google accounts
 - 👤 **User Identity Tracking** - Know which user is accessing which tools
 - 🚀 **Multi-Server Aggregation** - Supports stdio-based (uvx/npx), SSE, and Streamable MCP servers
 - 🔄 **Live Config Reload** - Update server definitions without restarting
@@ -20,11 +21,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **proxy_server.py** - Main application with key functions and classes:
 
-- `create_auth_provider()` - Initializes OAuth authentication using FastMCP's `OAuthProxy` with Auth0
-  - Creates `JWTVerifier` for token validation via Auth0 JWKS endpoint
-  - Configures OAuthProxy with Auth0 endpoints, credentials, and audience parameters
-  - Enables PKCE forwarding and consent screen for security
-- `load_users()` - Loads authorized users from `/data/users.json` (user whitelist)
+- `create_google_auth()` - Initializes Google OAuth authentication using FastMCP's native `GoogleProvider`
+  - Reads environment variables: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MCP_BASE_URL`, `GOOGLE_JWT_KEY`
+  - Creates `GoogleProvider` instance with required OAuth scopes for OpenID and email
+  - Returns `None` if credentials not configured, triggering clear error messages
+  - Handles JWT signing key for production deployments (optional for development)
 - `ResilientMCPProxy` - Orchestrates server lifecycle with:
   - Automatic restart on crashes with exponential backoff (max 10 attempts)
   - Live config reloading via file watching
@@ -35,6 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **version.py** - Version management with `get_version()` and `get_version_info()` functions. Auto-updated by CI/CD.
 
 **mcp_config.json** - MCP servers configuration (Claude-compatible format):
+
 ```json
 {
   "mcpServers": {
@@ -46,46 +48,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 }
 ```
 
-**/data/users.json** - Authorized users whitelist (**TODO: Not currently enforced**):
-```json
-{
-  "user@example.com": {
-    "name": "User Name",
-    "roles": ["admin"],
-    "allowed_tools": ["*"]
-  }
-}
+**.env** - Environment configuration (required):
+
+```bash
+# Google OAuth (Required)
+GOOGLE_CLIENT_ID=123456789-abc123.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-abc123def456
+MCP_BASE_URL=https://your-domain.com
+GOOGLE_JWT_KEY=your_jwt_signing_key  # Optional, for production
+
+# MCP Proxy Configuration
+MCP_CONFIG_PATH=mcp_config.json
+MCP_HOST=0.0.0.0
+MCP_PORT=8080
+MCP_LIVE_RELOAD=true
 ```
 
-**Note**: User whitelisting is defined but not currently implemented. All users authenticated via OAuth are currently allowed. Access control happens at the OAuth provider level (Auth0/Keycloak/etc). See TODO in `create_proxy()` for planned implementation.
-
-**/data/auth_config.json** - Auth provider configuration (auto-generated):
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "${AUTH0_DOMAIN}",
-    "jwks_uri": "https://${AUTH0_DOMAIN}/.well-known/jwks.json",
-    "issuer": "https://${AUTH0_DOMAIN}/",
-    "audience": "${AUTH0_AUDIENCE}"
-  }
-}
-```
+**Note**: All authentication is handled via Google OAuth. Access control happens at the Google account level - any user with a Google account who completes the OAuth flow can access the proxy.
 
 ### Server Lifecycle
 
 1. **Startup** - `ResilientMCPProxy.run_with_restart()` orchestration loop starts
-2. **Auth Setup** - `create_auth_provider()` initializes OAuthProxy with Auth0
-   - Validates Auth0 environment variables are set
-   - Creates JWTVerifier pointing to Auth0 JWKS endpoint
-   - Initializes OAuthProxy for DCR and OAuth flow
+2. **Auth Setup** - `create_google_auth()` initializes Google OAuth authentication
+   - Validates required environment variables: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MCP_BASE_URL`
+   - Creates `GoogleProvider` instance with OpenID and email scopes
+   - Logs configuration details (redacted for security)
+   - Returns `None` if not configured, causing startup failure with clear instructions
 3. **Config Load** - Configuration loaded with retry logic (`load_config_with_retry()`)
    - Validates JSON schema against `mcp_config.schema.json`
    - Expands environment variables in config
-   - **TODO**: Load and enforce user whitelist from `/data/users.json`
 4. **FastMCP Creation** - Unified FastMCP instance created via `FastMCP.as_proxy(config, auth=auth)`
    - Single endpoint aggregates all configured MCP servers
-   - OAuthProxy middleware handles authentication
+   - GoogleProvider middleware handles OAuth authentication and DCR
 5. **HTTP Server** - FastMCP runs native HTTP transport on `0.0.0.0:8080` (or configured host/port)
    - Listens at `/mcp/` endpoint (OAuth discovery at `/.well-known/` endpoints)
 6. **File Watching** - Watchdog monitors config directory for changes
@@ -140,6 +134,7 @@ MCP_LIVE_RELOAD=true python proxy_server.py
 ```
 
 ### Docker Development
+
 ```bash
 # Build locally
 docker build -t mcp-proxy .
@@ -188,149 +183,119 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
 
 ### MCP Proxy Configuration
 
+### Google OAuth (Required)
+
+- `GOOGLE_CLIENT_ID` - OAuth 2.0 Client ID from Google Cloud Console
+  - Format: `123456789-abc123def456.apps.googleusercontent.com`
+  - Get from: https://console.developers.google.com/ → APIs & Services → Credentials
+- `GOOGLE_CLIENT_SECRET` - OAuth 2.0 Client Secret from Google Cloud Console
+  - Format: `GOCSPX-abc123def456...`
+  - Keep this secret - never commit to git
 - `MCP_BASE_URL` - Public URL where proxy is accessible (e.g., `https://mcp.your-domain.com`)
-  - **Must match the URL used in Claude Connector**
-  - Required for OAuth redirect URI validation
+  - **Must match authorized redirect URI in Google Cloud Console**
+  - Required for OAuth callback: `{MCP_BASE_URL}/auth/callback`
+  - Must use HTTPS in production (HTTP allowed for localhost only)
+- `GOOGLE_JWT_KEY` - JWT signing key for production deployments (optional)
+  - Generate with: `openssl rand -hex 32`
+  - If not set, FastMCP uses a default key (suitable for development only)
+  - Recommended for production to ensure token security across restarts
+
+### MCP Proxy Configuration
+
 - `MCP_CONFIG_PATH` - Path to MCP servers config (default: `mcp_config.json`)
-- `MCP_USERS_PATH` - Path to authorized users whitelist (default: `/data/users.json`)
-- `MCP_AUTH_CONFIG_PATH` - Path to auth provider config (default: `/data/auth_config.json`)
 - `MCP_HOST` - Bind host address (default: `0.0.0.0`)
 - `MCP_PORT` - Bind port (default: `8080`)
+- `MCP_LIVE_RELOAD` - Enable live config reload: `true|1|yes` (default: false)
+- `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none)
+  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
+  - Useful for security through obscurity or multi-tenant deployments
 
 ### Server Resilience
 
 - `MCP_MAX_RETRIES` - Config load retry attempts (default: 3)
 - `MCP_RESTART_DELAY` - Initial restart delay in seconds (default: 5)
-- `MCP_LIVE_RELOAD` - Enable live config reload: `true|1|yes` (default: false)
 
-### Optional Security
-
-- `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none)
-  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
-  - Useful for security through obscurity or multi-tenant deployments
-- `MCP_DISABLE_AUTH` - Disable all authentication: `true|1|yes` (default: false, **NOT RECOMMENDED**)
-
-### API Key Authentication
-
-- `MCP_API_KEYS` - API keys for service accounts (format: `key1:client1,key2:client2`)
-  - Example: `MCP_API_KEYS="sk-prod-abc123:ci-bot,sk-prod-xyz789:monitoring"`
-  - Each key maps to a client_id with full scopes (`["*"]`)
-  - Can be used **alongside OAuth** for hybrid authentication
-- `MCP_API_KEYS_PATH` - Path to API keys JSON file (alternative to env var)
-  - Format: `{"api-key-string": {"client_id": "user", "scopes": ["*"]}}`
-
-## Hybrid Authentication (OAuth + API Keys)
-
-MCP Proxy supports **both OAuth and API keys simultaneously** via `HybridAuthProvider`:
-
-- **OAuth 2.1** - For interactive users (Claude Desktop, web clients)
-- **API Keys** - For service accounts (CI/CD, monitoring, automation)
-
-### Configuration Examples
-
-```bash
-# OAuth only (interactive users)
-export MCP_AUTH_PROVIDER=oauth_proxy
-export AUTH0_DOMAIN=your-tenant.us.auth0.com
-export AUTH0_CLIENT_ID=your-client-id
-export AUTH0_CLIENT_SECRET=your-client-secret
-export AUTH0_AUDIENCE=your-api-audience
-
-# API keys only (service accounts)
-export MCP_API_KEYS="sk-prod-abc123:ci-bot,sk-prod-xyz789:monitoring"
-
-# Both (recommended for production)
-export MCP_AUTH_PROVIDER=oauth_proxy
-export AUTH0_DOMAIN=your-tenant.us.auth0.com
-export AUTH0_CLIENT_ID=your-client-id
-export AUTH0_CLIENT_SECRET=your-client-secret
-export AUTH0_AUDIENCE=your-api-audience
-export MCP_API_KEYS="sk-prod-abc123:ci-bot"
-```
-
-### Authentication Flow
-
-When a request arrives with `Authorization: Bearer <token>`:
-
-1. **OAuth Validation** - Tries to validate as OAuth JWT token first
-   - Uses JWTVerifier with Auth0 JWKS endpoint
-   - Validates issuer, audience, signature, expiry
-2. **API Key Fallback** - If OAuth fails, tries static API key validation
-   - Uses StaticTokenVerifier with configured keys
-   - Returns client_id and scopes for the key
-3. **Rejection** - If both fail, returns 401 Unauthorized
-
-### Use Cases
-
-- **Interactive users** → OAuth (full auth flow with consent)
-- **CI/CD pipelines** → API keys (no browser needed)
-- **Monitoring services** → API keys (long-lived credentials)
-- **Admin scripts** → API keys (programmatic access)
-
-## OAuth 2.1 Authentication
+## Google OAuth 2.0 Authentication
 
 ### Overview
 
-MCP Proxy uses FastMCP's `OAuthProxy` to wrap Auth0 and provide secure authentication:
+MCP Proxy uses FastMCP's built-in `GoogleProvider` for secure, native Google OAuth 2.0 authentication:
 
-1. **Dynamic Client Registration (DCR)** - Claude registers itself and gets fixed Auth0 credentials
-2. **Authorization Flow** - User logs into Auth0 with PKCE security
-3. **Consent Screen** - User approves which client gets access (prevents confused deputy attacks)
-4. **Token Exchange** - Auth0 issues JWT, OAuthProxy wraps in FastMCP JWT
-5. **Protected Access** - Subsequent MCP requests validated using JWT signature
+1. **Dynamic Client Registration (DCR)** - Claude.ai or other clients register themselves automatically
+2. **Authorization Flow** - User logs in with their Google account (supports Google Workspace)
+3. **Token Exchange** - Google issues access token, FastMCP validates and wraps in session JWT
+4. **Protected Access** - Subsequent MCP requests validated using JWT signature
+5. **Session Management** - FastMCP manages OAuth sessions with secure token storage
 
 ### Key Security Features
 
-- **PKCE (Proof Key for Code Exchange)** - End-to-end forwarding prevents token interception
-- **JWT Validation** - Tokens validated via Auth0 JWKS endpoint (public key pinning)
-- **User Whitelist** - **TODO**: Planned feature to restrict access to users in `/data/users.json`
-  - Currently, access control happens at OAuth provider level (Auth0/Keycloak user management)
-- **Consent Screen** - Explicit user approval before client gains access
-- **Encrypted Storage** - OAuth tokens encrypted at rest using Fernet encryption
-- **Token Expiry** - FastMCP tokens expire when upstream Auth0 tokens expire
+- **Google OAuth** - Leverages Google's trusted authentication infrastructure
+- **OpenID Connect** - Uses standard OIDC protocol with email scope
+- **JWT Signing** - Optional JWT signing key for production token security
+- **HTTPS Required** - Production deployments must use HTTPS (OAuth requirement)
+- **Automatic DCR** - FastMCP's GoogleProvider handles Dynamic Client Registration automatically
+- **Token Expiry** - Tokens expire based on JWT signing configuration
 
 ### OAuth Endpoints
 
-Automatically provided by OAuthProxy (via FastMCP):
+Automatically provided by GoogleProvider (via FastMCP):
 
-- `POST /.well-known/oauth-protected-resource` - OAuth server metadata
-- `GET /.well-known/oauth-authorization-server` - Authorization server info
-- `POST /register` - DCR endpoint (clients self-register)
-- `GET /authorize` - Authorization endpoint
-- `POST /token` - Token exchange endpoint
-- `GET /auth/callback` - OAuth callback from Auth0
+- `GET /.well-known/oauth-authorization-server` - Authorization server metadata
+- `POST /dcr` - Dynamic Client Registration endpoint
+- `GET /auth/login` - Initiates OAuth flow
+- `GET /auth/callback` - OAuth callback from Google
+- `POST /token` - Token exchange endpoint (for DCR clients)
+
+### Google Cloud Console Setup
+
+1. **Create OAuth Application**: https://console.developers.google.com/
+2. **Configure Authorized Origins**: Add `{MCP_BASE_URL}` (e.g., `https://mcp.your-domain.com`)
+3. **Configure Redirect URIs**: Add `{MCP_BASE_URL}/auth/callback`
+4. **Required Scopes**: `openid`, `https://www.googleapis.com/auth/userinfo.email`
+5. **Copy Credentials**: Client ID and Client Secret to `.env` file
+
+See [README.md](README.md) for detailed Google Cloud Console setup instructions.
 
 ### Debug Logging
 
-To see OAuth request details, enable httpx debug logging:
+To see OAuth request details, set log level:
 
-```python
-import logging
-logging.getLogger("httpx").setLevel(logging.DEBUG)
+```bash
+export MCP_LOG_LEVEL=DEBUG
+export MCP_LOG_LEVELS="fastmcp:DEBUG,httpx:DEBUG"
 ```
 
 This shows:
-- Auth0 token requests with audience parameters
-- JWKS endpoint calls for key validation
+
+- Google OAuth token requests
+- DCR registration attempts
 - Token validation successes/failures
-- Scope parameter passing
+- OAuth callback processing
 
 ## Versioning
 
 Uses automatic semantic versioning via GitHub Actions:
 
+- **Current Version**: v3.0.0 (Google OAuth only - breaking change from v2.x)
 - **Manual version bumps**: Edit `__version__` in `version.py` for major/minor changes
 - **Automatic patch increments**: CI auto-increments patch on main branch pushes
 - **Version display**: Logged at startup via `get_version_info()`
 - **Build tracking**: `__build__` field contains git commit SHA
 
+### Version History
+
+- **v3.0.0** (2026-01-19) - Google OAuth only, removed API key authentication and Auth0/Keycloak/Okta providers
+- **v2.0.x** - Hybrid authentication (OAuth + API keys, now deprecated)
+- **v1.x** - Initial release with Auth0 support
+
 To manually bump version:
+
 ```bash
 # Minor version bump
-sed -i 's/__version__ = "1.0.*"/__version__ = "1.1.0"/' version.py
+sed -i 's/__version__ = "3.0.*"/__version__ = "3.1.0"/' version.py
 
 # Major version bump
-sed -i 's/__version__ = "1.*"/__version__ = "2.0.0"/' version.py
+sed -i 's/__version__ = "3.*"/__version__ = "4.0.0"/' version.py
 ```
 
 ## CI/CD
@@ -345,14 +310,17 @@ Tags generated: `latest`, `v1.0.x`, `1.0`, `1`, `sha-abc123`, `main`
 ## Key Implementation Details
 
 ### Signal Handling
+
 - SIGTERM (Docker stop) and SIGINT (Ctrl+C) set `shutdown_requested` flag
 - Graceful shutdown stops file watcher and exits main loop
 
 ### Port Management
+
 - `wait_for_port_available()` retries binding for 10 seconds with 0.5s intervals
 - Critical for live reload since previous process may hold port briefly
 
 ### Error Handling
+
 - File not found and JSON syntax errors are permanent (no retry)
 - Other errors retry with exponential backoff: 1s, 2s, 4s, 8s...
 - Restart delay caps at 30 seconds to prevent excessive waiting

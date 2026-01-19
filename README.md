@@ -108,7 +108,13 @@ Get Claude.ai working with remote MCP servers in 3 steps:
 
 #### Create `mcp_config.json`
 
-This file defines which MCP servers to proxy:
+Copy the example config and customize with your MCP servers:
+
+```bash
+cp mcp_config.example.json mcp_config.json
+```
+
+Edit the file to define which MCP servers to proxy:
 
 ```json
 {
@@ -381,7 +387,16 @@ sudo certbot --nginx -d mcp.your-domain.com
 
 ### MCP Server Configuration
 
-The `mcp_config.json` file uses the same format as Claude Desktop:
+The `mcp_config.json` file uses the same format as Claude Desktop.
+
+**Getting Started**: Copy the example config to create your own:
+```bash
+cp mcp_config.example.json mcp_config.json
+```
+
+Your `mcp_config.json` is automatically ignored by git to prevent committing sensitive server URLs or credentials.
+
+**Note**: Copy `mcp_config.example.json` to `mcp_config.json` to get started. The example file is version controlled; your `mcp_config.json` is gitignored to prevent committing sensitive configs.
 
 #### Stdio Servers (npx, uvx)
 

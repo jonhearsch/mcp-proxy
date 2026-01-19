@@ -1,162 +1,175 @@
-# OAuth Provider Configuration
+# Google OAuth Authentication
 
-MCP Proxy supports multiple OAuth 2.1 / OIDC providers through a flexible configuration system.
+**MCP Proxy v3.0+ uses Google OAuth 2.0 exclusively** for secure, trusted authentication that's compatible with Claude.ai, Claude Code, and other MCP clients.
 
-## Supported Providers
+## Why Google OAuth?
 
-- **Auth0** - Industry-leading auth platform with easy setup
-- **Keycloak** - Open-source identity and access management
-- **Okta** - Enterprise identity platform
-- **Generic OIDC** - Any OAuth 2.1 / OpenID Connect compliant provider
+- ✅ **Native Claude.ai Support** - Claude.ai requires OAuth with Dynamic Client Registration (DCR)
+- 🔐 **Trusted Authentication** - Leverages Google's secure authentication infrastructure
+- 🎯 **Simple Setup** - Single provider, no complex configuration files
+- 🔧 **Built-in DCR** - FastMCP's GoogleProvider handles DCR automatically
+- 🌍 **Universal Access** - Anyone with a Google account can authenticate
+- 📊 **Google Workspace** - Supports both personal and Google Workspace accounts
 
-## Configuration Methods
+## Breaking Changes from v2.x
 
-### Method 1: auth_config.json (Recommended)
+**MCP Proxy v3.0.0 removed support for:**
 
-Create `/data/auth_config.json` with your provider configuration. This method supports:
-- Multiple providers without code changes
-- Environment variable expansion for secrets
-- Provider-specific customization
+- ❌ API key authentication (`MCP_API_KEYS`)
+- ❌ Auth0 provider
+- ❌ Keycloak provider
+- ❌ Okta provider
+- ❌ Generic OIDC provider
+- ❌ `auth_config.json` configuration file
+- ❌ `MCP_DISABLE_AUTH` flag
 
-### Method 2: Environment Variables (Legacy Auth0 Only)
-
-For backward compatibility, Auth0 can be configured using environment variables:
-- `AUTH0_DOMAIN`
-- `AUTH0_AUDIENCE`
-- `AUTH0_CLIENT_ID`
-- `AUTH0_CLIENT_SECRET`
-
-**Note:** If `auth_config.json` exists, it takes priority over environment variables.
+**Migration**: If you need Auth0/Keycloak/Okta, check out the v2.0.x branch or contribute a provider implementation!
 
 ---
 
-## Auth0 Configuration
+## Google Cloud Console Setup
 
-### Quick Setup
+### Step-by-Step Guide
 
-1. Create an Auth0 account at https://auth0.com (free tier available)
-2. Create a **Regular Web Application**
-3. Create an **API** with a unique identifier
-4. Copy your credentials
+#### 1. Access Google Cloud Console
 
-### Configuration File
+Go to https://console.developers.google.com/
 
-Create `/data/auth_config.json`:
+#### 2. Create or Select a Project
 
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "${AUTH0_DOMAIN}",
-    "audience": "${AUTH0_AUDIENCE}",
-    "client_id": "${AUTH0_CLIENT_ID}",
-    "client_secret": "${AUTH0_CLIENT_SECRET}"
-  }
-}
-```
+- Click "Select a project" → "New Project"
+- Name: "MCP Proxy" (or your preferred name)
+- Click "Create"
+
+#### 3. Configure OAuth Consent Screen
+
+- Navigate to: **APIs & Services** → **OAuth consent screen**
+- Choose:
+  - **External** - For public access (any Google account)
+  - **Internal** - For Google Workspace only (restricts to your organization)
+- Fill in required fields:
+  - **App name**: "MCP Proxy"
+  - **User support email**: your@email.com
+  - **Developer contact**: your@email.com
+- Click "Save and Continue"
+- **Add Scopes**:
+  - Click "Add or Remove Scopes"
+  - Select: `openid`, `email`
+  - Or manually add: `https://www.googleapis.com/auth/userinfo.email`
+- Click "Save and Continue" through remaining screens
+- Click "Back to Dashboard"
+
+#### 4. Create OAuth Client ID
+
+- Navigate to: **APIs & Services** → **Credentials**
+- Click **"+ CREATE CREDENTIALS"** → **"OAuth client ID"**
+- Application type: **"Web application"**
+- Name: "MCP Proxy Production"
+- **Authorized JavaScript origins**:
+  - Production: `https://your-domain.com`
+  - Local dev: `http://localhost:8080`
+- **Authorized redirect URIs**:
+  - Production: `https://your-domain.com/auth/callback`
+  - Local dev: `http://localhost:8080/auth/callback`
+- Click **"CREATE"**
+
+#### 5. Copy Credentials
+
+- Copy the **Client ID** (ends with `.apps.googleusercontent.com`)
+- Copy the **Client Secret** (starts with `GOCSPX-`)
+- Download JSON (optional, for backup)
 
 ### Environment Variables
 
-```bash
-# Required
-AUTH0_DOMAIN=your-tenant.us.auth0.com
-AUTH0_AUDIENCE=https://your-mcp-api
-AUTH0_CLIENT_ID=your-client-id
-AUTH0_CLIENT_SECRET=your-client-secret
+Create a `.env` file in your project root:
 
-# MCP Proxy
-MCP_AUTH_PROVIDER=oauth_proxy
-MCP_BASE_URL=https://your-domain.com
+```bash
+# Google OAuth (Required)
+GOOGLE_CLIENT_ID=123456789-abc123def456.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-abc123def456ghi789
+MCP_BASE_URL=https://mcp.your-domain.com
+
+# Optional: JWT signing key for production
+GOOGLE_JWT_KEY=  # Generate with: openssl rand -hex 32
+
+# MCP Proxy Configuration
+MCP_CONFIG_PATH=mcp_config.json
+MCP_HOST=0.0.0.0
+MCP_PORT=8080
+MCP_LIVE_RELOAD=true
 ```
 
-### Optional Advanced Fields
+**Security Notes:**
 
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "your-tenant.us.auth0.com",
-    "audience": "https://your-mcp-api",
-    "client_id": "your-client-id",
-    "client_secret": "your-client-secret",
+- ⚠️ **Never commit `.env` to git** - Add to `.gitignore`
+- ⚠️ **Keep Client Secret private** - Treat like a password
+- ⚠️ **Use HTTPS in production** - OAuth requires HTTPS (except localhost)
+- ✅ **Generate JWT key for production** - Ensures token security across restarts
 
-    "authorization_endpoint": "https://your-tenant.us.auth0.com/authorize",
-    "token_endpoint": "https://your-tenant.us.auth0.com/oauth/token",
-    "jwks_uri": "https://your-tenant.us.auth0.com/.well-known/jwks.json",
-    "issuer": "https://your-tenant.us.auth0.com/"
-  }
-}
+---
+
+## FastMCP GoogleProvider API
+
+MCP Proxy uses FastMCP's built-in `GoogleProvider` class:
+
+```python
+from fastmcp.server.auth.providers.google import GoogleProvider
+
+# Create Google OAuth provider
+auth = GoogleProvider(
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    base_url=os.getenv("MCP_BASE_URL"),
+    required_scopes=[
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+    ],
+    jwt_signing_key=os.getenv("GOOGLE_JWT_KEY"),  # Optional
+)
+
+# Use with FastMCP proxy
+proxy = FastMCP.as_proxy(config, auth=auth, name="mcp-proxy")
+```
+
+### GoogleProvider Features
+
+- ✅ **Automatic DCR** - Handles Dynamic Client Registration for Claude.ai
+- ✅ **OAuth 2.0 Flow** - Manages authorization code flow with Google
+- ✅ **Token Management** - Handles token exchange and validation
+- ✅ **Session Storage** - Secure JWT-based session management
+- ✅ **Scope Validation** - Ensures required scopes are granted
+- ✅ **HTTPS Enforcement** - Validates proper OAuth security (except localhost)
+
+### Implementation in proxy_server.py
+
+The `create_google_auth()` function in [proxy_server.py](../proxy_server.py):
+
+```python
+def create_google_auth() -> Optional[GoogleProvider]:
+    """Create Google OAuth provider for Claude.ai integration."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    base_url = os.getenv("MCP_BASE_URL")
+    jwt_key = os.getenv("GOOGLE_JWT_KEY")
+
+    if not all([client_id, client_secret, base_url]):
+        return None
+
+    return GoogleProvider(
+        client_id=client_id,
+        client_secret=client_secret,
+        base_url=base_url,
+        required_scopes=[
+            "openid",
+            "https://www.googleapis.com/auth/userinfo.email",
+        ],
+        jwt_signing_key=jwt_key if jwt_key else None,
+    )
 ```
 
 ---
 
-## Keycloak Configuration
-
-### Quick Setup
-
-1. Install Keycloak server (Docker: `quay.io/keycloak/keycloak`)
-2. Create a realm (e.g., "mcp-realm")
-3. Create a client with:
-   - Client Protocol: `openid-connect`
-   - Access Type: `confidential`
-   - Valid Redirect URIs: `https://your-domain.com/auth/callback`
-4. Copy client credentials from "Credentials" tab
-
-### Configuration File
-
-Create `/data/auth_config.json`:
-
-```json
-{
-  "provider": "keycloak",
-  "keycloak": {
-    "server_url": "${KEYCLOAK_SERVER_URL}",
-    "realm": "${KEYCLOAK_REALM}",
-    "client_id": "${KEYCLOAK_CLIENT_ID}",
-    "client_secret": "${KEYCLOAK_CLIENT_SECRET}"
-  }
-}
-```
-
-### Environment Variables
-
-```bash
-# Required
-KEYCLOAK_SERVER_URL=https://keycloak.your-domain.com
-KEYCLOAK_REALM=mcp-realm
-KEYCLOAK_CLIENT_ID=mcp-proxy-client
-KEYCLOAK_CLIENT_SECRET=your-client-secret
-
-# MCP Proxy
-MCP_AUTH_PROVIDER=oauth_proxy
-MCP_BASE_URL=https://your-domain.com
-```
-
-### Example with Defaults
-
-The proxy auto-generates standard Keycloak endpoints:
-
-```json
-{
-  "provider": "keycloak",
-  "keycloak": {
-    "server_url": "https://keycloak.example.com",
-    "realm": "master",
-    "client_id": "mcp-client",
-    "client_secret": "abc123"
-  }
-}
-```
-
-Auto-generated endpoints:
-- Authorization: `{server_url}/realms/{realm}/protocol/openid-connect/auth`
-- Token: `{server_url}/realms/{realm}/protocol/openid-connect/token`
-- JWKS: `{server_url}/realms/{realm}/protocol/openid-connect/certs`
-- Issuer: `{server_url}/realms/{realm}`
-
----
-
-## Okta Configuration
+## Testing Your Configuration
 
 ### Quick Setup
 
@@ -167,310 +180,220 @@ Auto-generated endpoints:
    - Grant types: Authorization Code, Refresh Token
 4. Copy Client ID and Client Secret
 
-### Configuration File
-
-Create `/data/auth_config.json`:
-
-```json
-{
-  "provider": "okta",
-  "okta": {
-    "domain": "${OKTA_DOMAIN}",
-    "client_id": "${OKTA_CLIENT_ID}",
-    "client_secret": "${OKTA_CLIENT_SECRET}",
-    "audience": "${OKTA_AUDIENCE:-api://default}"
-  }
-}
-```
-
-### Environment Variables
-
-```bash
-# Required
-OKTA_DOMAIN=dev-12345.okta.com
-OKTA_CLIENT_ID=your-client-id
-OKTA_CLIENT_SECRET=your-client-secret
-
-# Optional
-OKTA_AUDIENCE=api://default
-
-# MCP Proxy
-MCP_AUTH_PROVIDER=oauth_proxy
-MCP_BASE_URL=https://your-domain.com
-```
-
-### Example with Custom Authorization Server
-
-```json
-{
-  "provider": "okta",
-  "okta": {
-    "domain": "dev-12345.okta.com",
-    "client_id": "0oa1abc2def3ghi4jkl5",
-    "client_secret": "your-secret",
-    "audience": "api://my-custom-api",
-    "authorization_endpoint": "https://dev-12345.okta.com/oauth2/aus123/v1/authorize",
-    "token_endpoint": "https://dev-12345.okta.com/oauth2/aus123/v1/token",
-    "jwks_uri": "https://dev-12345.okta.com/oauth2/aus123/v1/keys",
-    "issuer": "https://dev-12345.okta.com/oauth2/aus123"
-  }
-}
-```
-
----
-
-## Generic OIDC Provider
-
-Use this for any OAuth 2.1 / OpenID Connect compliant provider:
-- Google Cloud Identity
-- Azure AD / Entra ID
-- GitLab
-- GitHub (Enterprise)
-- Custom OIDC implementations
-
-### Configuration File
-
-Create `/data/auth_config.json`:
-
-```json
-{
-  "provider": "generic_oidc",
-  "generic_oidc": {
-    "authorization_endpoint": "${OIDC_AUTHORIZATION_ENDPOINT}",
-    "token_endpoint": "${OIDC_TOKEN_ENDPOINT}",
-    "jwks_uri": "${OIDC_JWKS_URI}",
-    "issuer": "${OIDC_ISSUER}",
-    "client_id": "${OIDC_CLIENT_ID}",
-    "client_secret": "${OIDC_CLIENT_SECRET}",
-    "audience": "${OIDC_AUDIENCE:-${OIDC_CLIENT_ID}}"
-  }
-}
-```
-
-### Environment Variables
-
-```bash
-# Required
-OIDC_AUTHORIZATION_ENDPOINT=https://provider.com/oauth/authorize
-OIDC_TOKEN_ENDPOINT=https://provider.com/oauth/token
-OIDC_JWKS_URI=https://provider.com/.well-known/jwks.json
-OIDC_ISSUER=https://provider.com
-OIDC_CLIENT_ID=your-client-id
-OIDC_CLIENT_SECRET=your-client-secret
-
-# Optional
-OIDC_AUDIENCE=your-audience  # Defaults to client_id if not set
-
-# MCP Proxy
-MCP_AUTH_PROVIDER=oauth_proxy
-MCP_BASE_URL=https://your-domain.com
-```
-
-### Google Cloud Identity Example
-
-```json
-{
-  "provider": "generic_oidc",
-  "generic_oidc": {
-    "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-    "token_endpoint": "https://oauth2.googleapis.com/token",
-    "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs",
-    "issuer": "https://accounts.google.com",
-    "client_id": "your-client-id.apps.googleusercontent.com",
-    "client_secret": "your-client-secret",
-    "audience": "your-client-id.apps.googleusercontent.com",
-    "valid_scopes": ["openid", "email", "profile"]
-  }
-}
-```
-
-### Azure AD / Entra ID Example
-
-```json
-{
-  "provider": "generic_oidc",
-  "generic_oidc": {
-    "authorization_endpoint": "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/authorize",
-    "token_endpoint": "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token",
-    "jwks_uri": "https://login.microsoftonline.com/{tenant-id}/discovery/v2.0/keys",
-    "issuer": "https://login.microsoftonline.com/{tenant-id}/v2.0",
-    "client_id": "your-client-id",
-    "client_secret": "your-client-secret",
-    "audience": "api://your-client-id"
-  }
-}
-```
-
----
-
-## Advanced Configuration
-
-### Custom Scopes
-
-All providers support custom scopes:
-
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "your-tenant.auth0.com",
-    "...": "...",
-    "valid_scopes": ["openid", "profile", "email", "custom:scope"]
-  }
-}
-```
-
-### Extra OAuth Parameters
-
-Add provider-specific parameters:
-
-```json
-{
-  "provider": "keycloak",
-  "keycloak": {
-    "...": "...",
-    "extra_authorize_params": {
-      "prompt": "login",
-      "max_age": "3600"
-    },
-    "extra_token_params": {
-      "client_assertion_type": "custom-value"
-    }
-  }
-}
-```
-
-### Environment Variable Expansion
-
-All config values support environment variable substitution:
-
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "${AUTH0_DOMAIN}",
-    "audience": "${AUTH0_AUDIENCE}",
-    "client_id": "${AUTH0_CLIENT_ID}",
-    "client_secret": "${AUTH0_CLIENT_SECRET}"
-  }
-}
-```
-
-With fallback defaults:
-
-```json
-{
-  "provider": "okta",
-  "okta": {
-    "audience": "${OKTA_AUDIENCE:-api://default}"
-  }
-}
-```
-
----
-
-## Testing Your Configuration
-
 ### 1. Check OAuth Metadata
 
 ```bash
-# OAuth Protected Resource metadata
-curl https://your-domain.com/.well-known/oauth-protected-resource
-
 # Authorization Server metadata
-curl https://your-domain.com/.well-known/oauth-authorization-server
+curl http://localhost:8080/.well-known/oauth-authorization-server
+
+# Expected: JSON with authorization_endpoint, token_endpoint, etc.
 ```
 
-### 2. Test Dynamic Client Registration
+### 2. Test Dynamic Client Registration (DCR)
 
 ```bash
-curl -X POST https://your-domain.com/register \
+curl -X POST http://localhost:8080/dcr \
   -H "Content-Type: application/json" \
   -d '{
     "client_name": "test-client",
-    "redirect_uris": ["http://localhost:3000/callback"],
-    "response_types": ["code"],
-    "grant_types": ["authorization_code", "refresh_token"],
-    "token_endpoint_auth_method": "client_secret_post"
+    "redirect_uris": ["http://localhost:3000/callback"]
   }'
+
+# Expected: 201 response with client_id and client_secret
 ```
 
-Expected: 201 response with client credentials.
-
-### 3. Check Server Logs
+### 3. Check Health Endpoint
 
 ```bash
+curl http://localhost:8080/health
+
+# Expected: {"status": "healthy", "service": "mcp-proxy"}
+```
+
+### 4. Check Server Logs
+
+```bash
+# If running with Docker
 docker logs mcp-proxy
 
+# If running locally
+python proxy_server.py
+
 # Look for:
-# ✓ Loaded auth_config.json from /data/auth_config.json
-# ✓ JWTVerifier configured
-# ✓ OAuthProxy successfully initialized with [Provider]
+# ✓ GoogleProvider successfully initialized
+# ✓ Google OAuth authentication enabled (Claude.ai compatible)
+# ✓ Created unified FastMCP proxy with N server(s)
 ```
 
----
+### 5. Test with Claude.ai
 
-## Migration from Environment Variables
-
-If you're currently using Auth0 environment variables and want to migrate:
-
-1. **Create auth_config.json** with same values:
-
-```json
-{
-  "provider": "auth0",
-  "auth0": {
-    "domain": "${AUTH0_DOMAIN}",
-    "audience": "${AUTH0_AUDIENCE}",
-    "client_id": "${AUTH0_CLIENT_ID}",
-    "client_secret": "${AUTH0_CLIENT_SECRET}"
-  }
-}
-```
-
-2. **Keep environment variables** - they'll be expanded in the config
-3. **Test** - Existing setup should work identically
-4. **(Optional) Switch providers** - Just update `auth_config.json`
+1. Deploy proxy with HTTPS (required for OAuth)
+2. Add MCP server in Claude settings:
+   - Server URL: `https://your-domain.com/mcp`
+3. Complete Google OAuth flow when prompted
+4. Test tool access through Claude interface
 
 ---
 
 ## Troubleshooting
 
-### "Unsupported provider" error
+### "Google OAuth authentication is required but not configured"
 
-**Cause:** `provider` field doesn't match a supported type.
+**Cause:** Missing environment variables.
 
-**Solution:** Use one of: `auth0`, `keycloak`, `okta`, `generic_oidc`
+**Solution:** Set all required variables in `.env`:
 
-### "Missing required configuration" error
+```bash
+GOOGLE_CLIENT_ID=123456789-abc123.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-abc123def456
+MCP_BASE_URL=https://your-domain.com
+```
 
-**Cause:** Required fields for the provider are not set.
+### "redirect_uri_mismatch" error
 
-**Solution:** Check provider-specific required fields above. Use logs to see what's missing.
-
-### "Invalid JSON in auth_config.json"
-
-**Cause:** Syntax error in JSON file.
-
-**Solution:** Validate JSON at https://jsonlint.com
-
-### Token validation fails
-
-**Cause:** JWKS URI, issuer, or audience mismatch.
+**Cause:** Redirect URI doesn't match Google Cloud Console configuration.
 
 **Solution:**
-1. Check provider logs for exact values
-2. Enable debug logging: `logging.getLogger("httpx").setLevel(logging.DEBUG)`
-3. Verify JWKS endpoint is accessible: `curl {jwks_uri}`
+
+1. Check `MCP_BASE_URL` matches your domain exactly
+2. In Google Cloud Console, add `{MCP_BASE_URL}/auth/callback` to authorized redirect URIs
+3. Add `{MCP_BASE_URL}` to authorized JavaScript origins
+
+### "Invalid Client" error
+
+**Cause:** Client ID or Client Secret is incorrect.
+
+**Solution:**
+
+1. Verify credentials in Google Cloud Console → APIs & Services → Credentials
+2. Copy fresh Client ID and Client Secret
+3. Update `.env` file
+4. Restart proxy server
+
+### OAuth flow redirects to wrong URL
+
+**Cause:** `MCP_BASE_URL` doesn't match actual deployment URL.
+
+**Solution:**
+
+- Local: `MCP_BASE_URL=http://localhost:8080`
+- Production: `MCP_BASE_URL=https://your-domain.com` (must use HTTPS)
+
+### "Failed to create GoogleProvider" error
+
+**Cause:** FastMCP version incompatible or Google OAuth not available.
+
+**Solution:**
+
+1. Update FastMCP: `pip install 'fastmcp[auth]>=2.13.0'`
+2. Verify `from fastmcp.server.auth.providers.google import GoogleProvider` works
+3. Check logs for specific error details
+
+### HTTPS requirement
+
+**Issue:** Google OAuth requires HTTPS in production.
+
+**Solution:**
+
+- **Local development**: Use `http://localhost:8080` (HTTP allowed)
+- **Production**: Must use HTTPS - options include:
+  - Cloudflare Tunnel (free, easy)
+  - Let's Encrypt with Nginx/Caddy
+  - Cloud provider load balancer (AWS ALB, GCP HTTPS LB)
+  - Reverse proxy with SSL termination
+
+---
+
+## Debugging
+
+### Enable Debug Logging
+
+```bash
+# Set in .env or environment
+export MCP_LOG_LEVEL=DEBUG
+export MCP_LOG_LEVELS="fastmcp:DEBUG,httpx:DEBUG"
+
+# Start proxy
+python proxy_server.py
+```
+
+This shows:
+
+- Google OAuth configuration details (redacted)
+- OAuth endpoint requests
+- DCR registration attempts
+- Token validation successes/failures
+- HTTP requests to/from Google
+
+### Check Google Cloud Console
+
+**Verify OAuth Client Configuration:**
+
+1. Go to: https://console.developers.google.com/
+2. Navigate to: APIs & Services → Credentials
+3. Click your OAuth Client ID
+4. Verify:
+   - ✅ Authorized JavaScript origins includes `{MCP_BASE_URL}`
+   - ✅ Authorized redirect URIs includes `{MCP_BASE_URL}/auth/callback`
+   - ✅ Client ID matches `GOOGLE_CLIENT_ID` in `.env`
+   - ✅ Client Secret is valid (regenerate if unsure)
+
+### Common Log Messages
+
+**Success:**
+
+```
+✓ GoogleProvider successfully initialized
+✓ Google OAuth authentication enabled (Claude.ai compatible)
+✓ Created unified FastMCP proxy with 3 server(s)
+Server running at http://0.0.0.0:8080
+```
+
+**Missing Configuration:**
+
+```
+Google OAuth authentication is required but not configured.
+Set these environment variables:
+  - GOOGLE_CLIENT_ID: OAuth 2.0 Client ID
+  - GOOGLE_CLIENT_SECRET: OAuth 2.0 Client Secret
+  - MCP_BASE_URL: Public URL of this proxy
+```
 
 ---
 
 ## Security Best Practices
 
-✅ **Use environment variables for secrets** - Never commit `client_secret` to git
-✅ **Validate redirect URIs** - Whitelist exact callback URLs in your provider
-✅ **Enable MFA** - Require multi-factor authentication on your auth provider
-✅ **Rotate credentials** - Update client secrets every 90 days minimum
+✅ **Never commit secrets to git** - Add `.env` to `.gitignore`
+✅ **Use HTTPS in production** - OAuth requires HTTPS (except localhost)
+✅ **Generate JWT signing key** - Use `openssl rand -hex 32` for `GOOGLE_JWT_KEY`
+✅ **Rotate credentials regularly** - Update Client Secret every 90 days
+✅ **Restrict redirect URIs** - Only whitelist exact URLs you control
+✅ **Monitor OAuth logs** - Watch for suspicious authentication attempts
+✅ **Use Google Workspace Internal** - If applicable, restrict to your organization
+
+---
+
+## Additional Resources
+
+- **Google OAuth Documentation**: https://developers.google.com/identity/protocols/oauth2
+- **Google Cloud Console**: https://console.developers.google.com/
+- **FastMCP Documentation**: https://gofastmcp.com/
+- **FastMCP Google Provider**: https://gofastmcp.com/integrations/google
+- **Claude.ai MCP Support**: https://docs.anthropic.com/en/docs/model-context-protocol
+- **MCP Proxy GitHub**: https://github.com/jlowin/mcp-proxy (or your repo URL)
+
+---
+
+## Contributing
+
+Want to add support for other OAuth providers (Auth0, Keycloak, Okta, etc.)?
+
+1. Check FastMCP's provider implementations for reference
+2. Create a new provider class following FastMCP's provider API
+3. Submit a pull request with documentation
+4. See v2.0.x branch for historical Auth0/Keycloak/Okta implementations
+
+**Note:** MCP Proxy v3.0+ focuses on Google OAuth for simplicity and Claude.ai compatibility. Other providers were removed to reduce complexity and maintenance burden.
 ✅ **Use HTTPS** - Always use TLS/SSL for production (Cloudflare Tunnel, Let's Encrypt, etc.)
 ✅ **Audit access** - Review user whitelist in `/data/users.json` regularly
 
