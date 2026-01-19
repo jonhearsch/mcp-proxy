@@ -3,10 +3,11 @@ version: "3.8"
 services:
   mcp-proxy:
     build: .
-    ports:
-      - "8080:8080"
+    network_mode: "host"
+    # Note: When using host networking, ports section is not needed
+    # The service will bind directly to host's 0.0.0.0:8080
     volumes:
-      - ./mcp_config.json:/app/mcp_config.json:ro
+      - ./mcp_config_dev.json:/app/mcp_config.json:ro
     environment:
       # REQUIRED: Google OAuth credentials
       # Get from: https://console.developers.google.com/

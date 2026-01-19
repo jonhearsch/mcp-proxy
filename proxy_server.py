@@ -557,10 +557,12 @@ class ResilientMCPProxy:
             # Create SINGLE unified FastMCP instance with all servers
             try:
                 proxy_config = {"mcpServers": mcp_servers}
+                
                 self.proxy = FastMCP.as_proxy(
                     proxy_config,
                     name="mcp-proxy",
-                    auth=auth
+                    auth=auth,
+                    icon="https://raw.githubusercontent.com/jonhearsch/random/refs/heads/main/jk-logo2.png"
                 )
 
                 # Add health check endpoint
