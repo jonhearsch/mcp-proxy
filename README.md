@@ -7,6 +7,7 @@
 ---
 
 ### 🎯 Perfect for:
+
 - **Remote MCP access** - Use Claude.ai tools from anywhere, not just localhost
 - **Team collaboration** - Share MCP servers securely across your organization
 - **Cloud deployments** - Host MCP tools on VPS, Docker, Kubernetes, or serverless
@@ -16,11 +17,13 @@
 ## Why MCP Proxy?
 
 **Problems:**
+
 1. Claude's MCP support only works with servers running on your local machine
 2. You can't access your tools remotely, share with teammates, or use from different devices
 3. Managing authentication for remote MCP access is complex
 
 **Solution:** MCP Proxy is a **remote MCP server gateway** that lets you:
+
 - ✅ Access Claude.ai tools from **anywhere** (not just localhost)
 - ✅ Use Claude.ai with any MCP-compatible client remotely
 - ✅ Deploy MCP servers once, use everywhere
@@ -30,6 +33,7 @@
 ## Features
 
 ### Remote Access & Deployment
+
 - 🌐 **Remote MCP Server Access** - Use Claude.ai from anywhere, not just your local machine
 - ☁️ **Cloud-Ready** - Deploy to AWS, GCP, Azure, DigitalOcean, Railway, Render, or any VPS
 - 🐳 **Docker Support** - One-line deployment with multi-architecture support (AMD64/ARM64)
@@ -37,6 +41,7 @@
 - 🔐 **Cloudflare Tunnel Ready** - Expose securely without public IP or port forwarding
 
 ### MCP Server Management
+
 - 🚀 **Multi-Server Aggregation** - Combine stdio (uvx, npx), SSE, and HTTP MCP servers
 - 📝 **Claude-Compatible Config** - Same JSON format as Claude Desktop configuration
 - 🔄 **Live Config Reload** - Add/remove servers without restarting
@@ -44,6 +49,7 @@
 - 🏥 **Auto-Restart & Health Checks** - Resilient server lifecycle management
 
 ### Security & Control
+
 - 🔐 **Google OAuth Authentication** - Secure, trusted authentication via Google accounts
 - 👤 **User Identity Tracking** - Know which team member is using which tools
 - 🔐 **Zero-Trust Ready** - Works with network segmentation and access policies
@@ -100,6 +106,7 @@ Get Claude.ai working with remote MCP servers in 3 steps:
    - Save these securely - you'll need them in step 2
 
 **Important Notes:**
+
 - HTTPS is required for production (Google only allows HTTP for localhost)
 - Redirect URI must match exactly (including port if non-standard)
 - For Cloudflare Tunnel, use your tunnel URL
@@ -132,6 +139,7 @@ Edit the file to define which MCP servers to proxy:
 ```
 
 **Supported server types:**
+
 - **stdio servers**: `uvx`, `npx` commands (like above)
 - **HTTP servers**: `{"url": "https://server.com/mcp", "transport": "http"}`
 - **SSE servers**: `{"url": "https://server.com/sse", "transport": "sse"}`
@@ -199,6 +207,7 @@ services:
 ```
 
 Start with:
+
 ```bash
 docker-compose up -d
 ```
@@ -245,6 +254,7 @@ Cloudflare Tunnel provides free HTTPS without exposing ports or managing certifi
 #### Setup Cloudflare Tunnel
 
 1. **Install cloudflared**
+
    ```bash
    # macOS
    brew install cloudflared
@@ -255,16 +265,19 @@ Cloudflare Tunnel provides free HTTPS without exposing ports or managing certifi
    ```
 
 2. **Login to Cloudflare**
+
    ```bash
    cloudflared tunnel login
    ```
 
 3. **Create Tunnel**
+
    ```bash
    cloudflared tunnel create mcp-proxy
    ```
 
 4. **Create config file** (`~/.cloudflared/config.yml`):
+
    ```yaml
    tunnel: <your-tunnel-id>
    credentials-file: /home/user/.cloudflared/<your-tunnel-id>.json
@@ -276,11 +289,13 @@ Cloudflare Tunnel provides free HTTPS without exposing ports or managing certifi
    ```
 
 5. **Route DNS**
+
    ```bash
    cloudflared tunnel route dns mcp-proxy mcp.your-domain.com
    ```
 
 6. **Run tunnel**
+
    ```bash
    cloudflared tunnel run mcp-proxy
    ```
@@ -315,11 +330,13 @@ docker-compose up -d
 #### Nginx Reverse Proxy
 
 Install nginx and certbot:
+
 ```bash
 sudo apt install nginx certbot python3-certbot-nginx -y
 ```
 
 Create `/etc/nginx/sites-available/mcp-proxy`:
+
 ```nginx
 server {
     listen 80;
@@ -340,6 +357,7 @@ server {
 ```
 
 Enable and get SSL certificate:
+
 ```bash
 sudo ln -s /etc/nginx/sites-available/mcp-proxy /etc/nginx/sites-enabled/
 sudo nginx -t
@@ -350,16 +368,19 @@ sudo certbot --nginx -d mcp.your-domain.com
 ### Option 3: Cloud Platforms
 
 #### Railway.app
+
 1. Connect GitHub repository
 2. Add environment variables from `.env`
 3. Deploy - Railway provides HTTPS automatically
 
 #### Render.com
+
 1. New Web Service → Connect repository
 2. Add environment variables
 3. Deploy - Render provides HTTPS automatically
 
 #### DigitalOcean App Platform
+
 1. Create new app → GitHub repository
 2. Add environment variables
 3. Deploy - Automatic HTTPS
@@ -370,26 +391,27 @@ sudo certbot --nginx -d mcp.your-domain.com
 
 ### Environment Variables
 
-| Variable | Required | Description | Default |
-|----------|----------|-------------|---------|
-| `GOOGLE_CLIENT_ID` | ✅ | OAuth 2.0 Client ID from Google Cloud Console | - |
-| `GOOGLE_CLIENT_SECRET` | ✅ | OAuth 2.0 Client Secret | - |
-| `MCP_BASE_URL` | ✅ | Public URL for OAuth callbacks | - |
-| `GOOGLE_JWT_KEY` | ⚠️ | JWT signing key (recommended for production) | auto-generated |
-| `MCP_CONFIG_PATH` | ❌ | Path to MCP servers config | `mcp_config.json` |
-| `MCP_HOST` | ❌ | Server bind address | `0.0.0.0` |
-| `MCP_PORT` | ❌ | Server bind port | `8080` |
-| `MCP_LIVE_RELOAD` | ❌ | Enable live config reload | `false` |
-| `MCP_MAX_RETRIES` | ❌ | Config load retry attempts | `3` |
-| `MCP_RESTART_DELAY` | ❌ | Initial restart delay (seconds) | `5` |
-| `MCP_PATH_PREFIX` | ❌ | Custom URL path prefix | - |
-| `MCP_LOG_LEVEL` | ❌ | Global log level | `INFO` |
+| Variable               | Required | Description                                   | Default           |
+| ---------------------- | -------- | --------------------------------------------- | ----------------- |
+| `GOOGLE_CLIENT_ID`     | ✅       | OAuth 2.0 Client ID from Google Cloud Console | -                 |
+| `GOOGLE_CLIENT_SECRET` | ✅       | OAuth 2.0 Client Secret                       | -                 |
+| `MCP_BASE_URL`         | ✅       | Public URL for OAuth callbacks                | -                 |
+| `GOOGLE_JWT_KEY`       | ⚠️       | JWT signing key (recommended for production)  | auto-generated    |
+| `MCP_CONFIG_PATH`      | ❌       | Path to MCP servers config                    | `mcp_config.json` |
+| `MCP_HOST`             | ❌       | Server bind address                           | `0.0.0.0`         |
+| `MCP_PORT`             | ❌       | Server bind port                              | `8080`            |
+| `MCP_LIVE_RELOAD`      | ❌       | Enable live config reload                     | `false`           |
+| `MCP_MAX_RETRIES`      | ❌       | Config load retry attempts                    | `3`               |
+| `MCP_RESTART_DELAY`    | ❌       | Initial restart delay (seconds)               | `5`               |
+| `MCP_PATH_PREFIX`      | ❌       | Custom URL path prefix                        | -                 |
+| `MCP_LOG_LEVEL`        | ❌       | Global log level                              | `INFO`            |
 
 ### MCP Server Configuration
 
 The `mcp_config.json` file uses the same format as Claude Desktop.
 
 **Getting Started**: Copy the example config to create your own:
+
 ```bash
 cp mcp_config.example.json mcp_config.json
 ```
@@ -489,6 +511,7 @@ Your `mcp_config.json` is automatically ignored by git to prevent committing sen
 ```
 
 Store secrets in `.env`:
+
 ```bash
 SENSITIVE_API_KEY=sk-prod-abc123...
 DATABASE_URL=postgresql://user:pass@host/db
@@ -501,6 +524,7 @@ DATABASE_URL=postgresql://user:pass@host/db
 ### OAuth Authentication Issues
 
 **Problem:** "OAuth authentication is required but not configured"
+
 ```
 Solution: Check environment variables are set correctly:
   export GOOGLE_CLIENT_ID="123456789-abc.apps.googleusercontent.com"
@@ -509,6 +533,7 @@ Solution: Check environment variables are set correctly:
 ```
 
 **Problem:** "Redirect URI mismatch" error
+
 ```
 Solution: Ensure Google Cloud Console redirect URI matches exactly:
   - Authorized redirect URI: https://your-domain.com/auth/callback
@@ -517,6 +542,7 @@ Solution: Ensure Google Cloud Console redirect URI matches exactly:
 ```
 
 **Problem:** "JavaScript origin blocked"
+
 ```
 Solution: Add authorized JavaScript origin in Google Cloud Console:
   - Authorized JavaScript origins: https://your-domain.com
@@ -526,6 +552,7 @@ Solution: Add authorized JavaScript origin in Google Cloud Console:
 ### Server Connection Issues
 
 **Problem:** MCP servers fail to start
+
 ```bash
 # Check logs
 docker logs mcp-proxy
@@ -538,6 +565,7 @@ npx -y @modelcontextprotocol/server-filesystem /data
 ```
 
 **Problem:** "Port already in use"
+
 ```bash
 # Find process using port 8080
 sudo lsof -i :8080
@@ -547,6 +575,7 @@ MCP_PORT=8081 python proxy_server.py
 ```
 
 **Problem:** Health check fails
+
 ```bash
 # Test health endpoint
 curl http://localhost:8080/health
@@ -558,6 +587,7 @@ curl http://localhost:8080/health
 ### Google OAuth Setup Issues
 
 **Problem:** Can't find OAuth consent screen
+
 ```
 Solution: Ensure you've selected the correct project in Google Cloud Console
   - Top navigation bar → Select correct project
@@ -565,6 +595,7 @@ Solution: Ensure you've selected the correct project in Google Cloud Console
 ```
 
 **Problem:** "App not verified" warning
+
 ```
 Solution: Normal for test/dev. For production:
   - Complete OAuth consent screen verification process
@@ -637,6 +668,7 @@ docker run -p 8080:8080 \
 ### Why Google OAuth instead of API keys?
 
 Claude.ai requires OAuth with Dynamic Client Registration (DCR). Google OAuth provides:
+
 - Trusted authentication via Google accounts
 - No manual API key management
 - Built-in user identity tracking
@@ -649,6 +681,7 @@ The current version is optimized for Google OAuth for Claude.ai compatibility. F
 ### What MCP servers are supported?
 
 All MCP servers that support:
+
 - **stdio transport**: npx, uvx commands
 - **HTTP transport**: REST API-style servers
 - **SSE transport**: Server-Sent Events servers
@@ -670,6 +703,7 @@ pip install -r requirements.txt --upgrade
 ### Can I run multiple MCP Proxy instances?
 
 Yes! Each instance can have different configurations:
+
 ```bash
 # Instance 1 - Production
 MCP_PORT=8080 MCP_CONFIG_PATH=prod_config.json python proxy_server.py &

@@ -29,6 +29,7 @@ This folder contains historical documentation from the development of MCP Proxy.
 These documents are kept for historical context but are not required for using or deploying MCP Proxy.
 
 For current documentation, see:
+
 - [README.md](../README.md) - Getting started guide
 - [CLAUDE.md](../CLAUDE.md) - Developer/AI assistant reference
 - [docs/AUTH_PROVIDERS.md](../docs/AUTH_PROVIDERS.md) - Google OAuth setup
