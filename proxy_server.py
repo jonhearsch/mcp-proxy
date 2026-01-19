@@ -561,8 +561,7 @@ class ResilientMCPProxy:
                 self.proxy = FastMCP.as_proxy(
                     proxy_config,
                     name="mcp-proxy",
-                    auth=auth,
-                    icon="https://raw.githubusercontent.com/jonhearsch/random/refs/heads/main/jk-logo2.png"
+                    auth=auth
                 )
 
                 # Add health check endpoint
