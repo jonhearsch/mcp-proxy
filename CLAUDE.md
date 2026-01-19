@@ -206,9 +206,6 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
 - `MCP_HOST` - Bind host address (default: `0.0.0.0`)
 - `MCP_PORT` - Bind port (default: `8080`)
 - `MCP_LIVE_RELOAD` - Enable live config reload: `true|1|yes` (default: false)
-- `MCP_PATH_PREFIX` - Custom path prefix for MCP endpoint (default: none)
-  - Example: `3434dc5d-349b-401c-8071-7589df9a0bce` creates `/3434dc5d-349b-401c-8071-7589df9a0bce/mcp/`
-  - Useful for security through obscurity or multi-tenant deployments
 
 ### Server Resilience
 

@@ -403,7 +403,6 @@ sudo certbot --nginx -d mcp.your-domain.com
 | `MCP_LIVE_RELOAD`      | ❌       | Enable live config reload                     | `false`           |
 | `MCP_MAX_RETRIES`      | ❌       | Config load retry attempts                    | `3`               |
 | `MCP_RESTART_DELAY`    | ❌       | Initial restart delay (seconds)               | `5`               |
-| `MCP_PATH_PREFIX`      | ❌       | Custom URL path prefix                        | -                 |
 | `MCP_LOG_LEVEL`        | ❌       | Global log level                              | `INFO`            |
 
 ### MCP Server Configuration

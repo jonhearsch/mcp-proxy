@@ -23,7 +23,6 @@ Environment Variables:
     MCP_HOST: Server bind address (default: 0.0.0.0)
     MCP_PORT: Server bind port (default: 8080)
     MCP_LIVE_RELOAD: Enable live config reloading (default: false)
-    MCP_PATH_PREFIX: Custom path prefix for MCP endpoint (default: none)
 
     # Server Resilience
     MCP_MAX_RETRIES: Config load retry attempts (default: 3)
@@ -325,7 +324,7 @@ class ResilientMCPProxy:
     MCP servers as defined in the configuration file.
     """
 
-    def __init__(self, config_path: str, max_retries: int = 3, restart_delay: int = 5, enable_live_reload: bool = True, path_prefix: str = "", host: str = "0.0.0.0", port: int = 8080):
+    def __init__(self, config_path: str, max_retries: int = 3, restart_delay: int = 5, enable_live_reload: bool = True, host: str = "0.0.0.0", port: int = 8080):
         """
         Initialize the resilient MCP proxy.
 
@@ -334,7 +333,6 @@ class ResilientMCPProxy:
             max_retries: Maximum number of retries for config loading
             restart_delay: Initial delay between restarts (seconds)
             enable_live_reload: Whether to enable live config reloading
-            path_prefix: Optional URL path prefix (e.g., "abc123" creates /abc123/mcp/ endpoints)
             host: Host address to bind to (default: 0.0.0.0)
             port: Port number to bind to (default: 8080)
         """
@@ -343,7 +341,6 @@ class ResilientMCPProxy:
         self.max_retries = max_retries
         self.restart_delay = restart_delay
         self.enable_live_reload = enable_live_reload
-        self.path_prefix = f"/{path_prefix.strip('/')}" if path_prefix else ""
         self.host = host
         self.port = port
 
@@ -731,14 +728,11 @@ def main():
         MCP_MAX_RETRIES: Config load retry attempts (default: 3)
         MCP_RESTART_DELAY: Initial restart delay in seconds (default: 5)
         MCP_LIVE_RELOAD: Enable file watching (default: false)
-        MCP_PATH_PREFIX: Custom path prefix (default: none, creates /mcp/ endpoint)
-                         Example: "3434dc5d-349b-401c-8071-7589df9a0bce" creates /3434dc5d-349b-401c-8071-7589df9a0bce/mcp/
     """
     # Read configuration from environment variables with sensible defaults
     config_path = os.getenv("MCP_CONFIG_PATH", "mcp_config.json")
     max_retries = int(os.getenv("MCP_MAX_RETRIES", "3"))
     restart_delay = int(os.getenv("MCP_RESTART_DELAY", "5"))
-    path_prefix = os.getenv("MCP_PATH_PREFIX", "")
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8080"))
 
@@ -752,7 +746,6 @@ def main():
         max_retries=max_retries,
         restart_delay=restart_delay,
         enable_live_reload=enable_live_reload,
-        path_prefix=path_prefix,
         host=host,
         port=port
     )
