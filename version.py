@@ -9,9 +9,12 @@ __version__ = "3.0.3"
 __build__ = "a17d82e8f7a4c93779ebe7c09b2fda99e7e4e26f"
 
 def get_version():
-    """Get the full version string including build info."""
-    if __build__ == "dev":
-        return f"{__version__}-dev"
+    """Get the full version string including build info.
+    
+    Returns a consistent semver build-metadata format:
+      3.0.3+dev          (local development)
+      3.0.3+a17d82e...   (CI build with commit SHA)
+    """
     return f"{__version__}+{__build__}"
 
 def get_version_info():
