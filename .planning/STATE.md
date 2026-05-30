@@ -2,7 +2,9 @@
 
 ## Current Status
 
-**Phase:** Not started
+**Phase:** Phase 1 — Production Hardening
+**Status:** Ready to execute
+**Plans:** 4 (waves 1–4)
 **Last updated:** 2026-05-30
 
 ## Project Reference
