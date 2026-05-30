@@ -374,11 +374,9 @@ class ResilientMCPProxy:
         """
         while not self.shutdown_event.is_set():
             if self.reload_event.wait(timeout=0.5):
-                logger.info("Config reload detected, requesting graceful restart...")
+                logger.info("Config change detected — sending SIGTERM for graceful reload...")
                 self.restart_event.set()
-                def shutdown():
-                    os.kill(os.getpid(), signal.SIGINT)
-                threading.Thread(target=shutdown, daemon=True).start()
+                os.kill(os.getpid(), signal.SIGTERM)
                 break
 
     def run_with_restart(self):
