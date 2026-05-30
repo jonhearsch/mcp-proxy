@@ -113,6 +113,8 @@ def setup_logging():
     
     # Configure root logger
     root_logger = logging.getLogger()
+    stdout_handler.addFilter(lambda r: r.levelno < logging.WARNING)
+    stderr_handler.setLevel(logging.WARNING)
     root_logger.setLevel(global_level)
     root_logger.handlers.clear()
     root_logger.addHandler(stdout_handler)
@@ -143,8 +145,9 @@ logger = logging.getLogger(__name__)
 
 # Configure loggers for common libraries (will be overridden by MCP_LOG_LEVELS if specified)
 logging.getLogger("fastmcp").setLevel(logging.INFO)
-logging.getLogger("fastmcp.auth").setLevel(logging.DEBUG)  # Enable auth debug logging
-logging.getLogger("fastmcp.server.auth").setLevel(logging.DEBUG)  # Enable auth debug logging
+if os.getenv("MCP_AUTH_DEBUG", "").lower() in ("true", "1"):
+    logging.getLogger("fastmcp.auth").setLevel(logging.DEBUG)
+    logging.getLogger("fastmcp.server.auth").setLevel(logging.DEBUG)
 logging.getLogger("httpx").setLevel(logging.INFO)
 
 # Log .env file loading
