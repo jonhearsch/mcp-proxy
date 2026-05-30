@@ -225,6 +225,7 @@ class ResilientMCPProxy:
             self.shutdown_event.set()
 
         signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+        signal.signal(signal.SIGTERM, signal_handler)  # Docker stop
 
     def setup_file_watcher(self):
         """
