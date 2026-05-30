@@ -349,8 +349,9 @@ class ResilientMCPProxy:
 
         # Runtime state
         self.proxy: Optional[FastMCP] = None
-        self.shutdown_requested = False
-        self.reload_requested = False
+        self.shutdown_event = threading.Event()
+        self.reload_event = threading.Event()
+        self.restart_event = threading.Event()
         self.config = None
 
         # File watching components
@@ -398,10 +399,9 @@ class ResilientMCPProxy:
             """Handle shutdown signals gracefully."""
             signal_name = signal.Signals(signum).name
             logger.info(f"Received {signal_name}, initiating graceful shutdown...")
-            self.shutdown_requested = True
+            self.shutdown_event.set()
 
         # Register handlers for common shutdown signals
-        signal.signal(signal.SIGTERM, signal_handler)  # Docker stop
         signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
 
     def setup_file_watcher(self):
@@ -461,8 +461,8 @@ class ResilientMCPProxy:
         Called by the file watcher when config changes are detected.
         Sets the reload flag which is checked by the monitoring thread.
         """
-        if not self.shutdown_requested:
-            self.reload_requested = True
+        if not self.shutdown_event.is_set():
+            self.reload_event.set()
             logger.info("Configuration reload requested")
 
     def load_config_with_retry(self) -> bool:
@@ -613,7 +613,7 @@ class ResilientMCPProxy:
             )
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
-            self.shutdown_requested = True
+            self.shutdown_event.set()
         except Exception as e:
             logger.error(f"Server error: {e}", exc_info=True)
             raise
@@ -633,7 +633,7 @@ class ResilientMCPProxy:
             )
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
-            self.shutdown_requested = True
+            self.shutdown_event.set()
         except Exception as e:
             logger.error(f"Server error: {e}", exc_info=True)
             raise
@@ -643,16 +643,15 @@ class ResilientMCPProxy:
         Background thread to monitor for configuration reload requests.
         When a reload is requested, set a restart_requested flag and shut down the server gracefully.
         """
-        while not self.shutdown_requested:
-            if self.reload_requested:
+        while not self.shutdown_event.is_set():
+            if self.reload_event.wait(timeout=0.5):
                 logger.info("Config reload detected, requesting graceful restart...")
-                self.restart_requested = True
+                self.restart_event.set()
                 # Trigger shutdown of the server (uvicorn)
                 def shutdown():
                     os.kill(os.getpid(), signal.SIGINT)
                 threading.Thread(target=shutdown, daemon=True).start()
                 break
-            time.sleep(0.5)
 
     def run_with_restart(self):
         """
@@ -667,8 +666,9 @@ class ResilientMCPProxy:
 
         restart_count = 0
 
-        while not self.shutdown_requested:
-            self.restart_requested = False
+        while not self.shutdown_event.is_set():
+            self.restart_event.clear()
+            self.reload_event.clear()
             try:
                 if not self.load_config_with_retry():
                     logger.error("Cannot start without valid configuration")
@@ -689,7 +689,7 @@ class ResilientMCPProxy:
                 self.stop_file_watcher()
 
                 # If reload was requested, wait for port and restart
-                if self.restart_requested:
+                if self.restart_event.is_set():
                     logger.info("Graceful reload requested, restarting with new configuration...")
                     if not self.wait_for_port_available():
                         logger.error("Port did not become available, skipping reload")
@@ -701,7 +701,7 @@ class ResilientMCPProxy:
             except Exception as e:
                 restart_count += 1
                 logger.error(f"Server crashed (restart #{restart_count}): {e}", exc_info=True)
-                if self.shutdown_requested:
+                if self.shutdown_event.is_set():
                     logger.info("Shutdown requested, not restarting")
                     break
                 if restart_count >= 10:
