@@ -648,11 +648,7 @@ class ResilientMCPProxy:
                 logger.info("Config reload detected, requesting graceful restart...")
                 self.restart_requested = True
                 # Trigger shutdown of the server (uvicorn)
-                import threading
                 def shutdown():
-                    import sys
-                    import os
-                    import signal
                     os.kill(os.getpid(), signal.SIGINT)
                 threading.Thread(target=shutdown, daemon=True).start()
                 break
