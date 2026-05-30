@@ -25,7 +25,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY proxy_server.py .
+COPY mcp_proxy/ ./mcp_proxy/
 # COPY mcp_config.json .
 COPY mcp_config.schema.json .
 COPY version.py .
@@ -52,4 +52,4 @@ ENV PATH="/home/mcp/.cargo/bin:/home/mcp/.local/bin:$PATH"
 # RUN uvx --help mcp-server-time > /dev/null 2>&1 || true
 # RUN uvx --help basic-memory > /dev/null 2>&1 || true
 
-CMD ["python", "proxy_server.py"]
+CMD ["python", "-m", "mcp_proxy"]
