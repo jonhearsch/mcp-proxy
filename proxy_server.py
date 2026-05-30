@@ -672,11 +672,11 @@ class ResilientMCPProxy:
             try:
                 if not self.load_config_with_retry():
                     logger.error("Cannot start without valid configuration")
-                    sys.exit(1)
+                    break
 
                 if not self.create_proxy():
                     logger.error("Cannot start without valid proxy")
-                    sys.exit(1)
+                    break
 
                 self.setup_file_watcher()
 
@@ -706,13 +706,23 @@ class ResilientMCPProxy:
                     break
                 if restart_count >= 10:
                     logger.error("Too many restart attempts, giving up")
-                    sys.exit(1)
+                    break
                 logger.info(f"Restarting server in {self.restart_delay} seconds...")
                 time.sleep(self.restart_delay)
                 self.restart_delay = min(self.restart_delay * 1.5, 30)
 
         logger.info("Proxy server shutdown complete")
         self.stop_file_watcher()
+
+def _parse_int_env(name: str, default: int) -> int:
+    """Parse an integer environment variable with a friendly fallback on invalid input."""
+    val = os.getenv(name, str(default))
+    try:
+        return int(val)
+    except ValueError:
+        logger.warning(f"Invalid value for {name}='{val}', using default {default}")
+        return default
+
 
 def main():
     """
@@ -731,10 +741,10 @@ def main():
     """
     # Read configuration from environment variables with sensible defaults
     config_path = os.getenv("MCP_CONFIG_PATH", "mcp_config.json")
-    max_retries = int(os.getenv("MCP_MAX_RETRIES", "3"))
-    restart_delay = int(os.getenv("MCP_RESTART_DELAY", "5"))
+    max_retries = _parse_int_env("MCP_MAX_RETRIES", 3)
+    restart_delay = _parse_int_env("MCP_RESTART_DELAY", 5)
     host = os.getenv("MCP_HOST", "0.0.0.0")
-    port = int(os.getenv("MCP_PORT", "8080"))
+    port = _parse_int_env("MCP_PORT", 8080)
 
     # Parse boolean environment variable for live reload
     # Accepts: true, 1, yes (case insensitive)
@@ -752,6 +762,9 @@ def main():
 
     # Start the main server loop with all resilience features
     proxy.run_with_restart()
+    # Exit with error code if loop ended abnormally (not clean shutdown)
+    if not proxy.shutdown_event.is_set():
+        sys.exit(1)
 
 
 if __name__ == "__main__":
