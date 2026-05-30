@@ -28,8 +28,8 @@
 **Plans:** 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Package refactor: extract proxy_server.py into mcp_proxy/ package (FOUND-02)
-- [ ] 01-02-PLAN.md — Signal handling + clean reload: add SIGTERM, fix os.kill(SIGINT) (FOUND-01, FOUND-03)
+- [x] 01-01-PLAN.md — Package refactor: extract proxy_server.py into mcp_proxy/ package (FOUND-02)
+- [x] 01-02-PLAN.md — Signal handling + clean reload: add SIGTERM, fix os.kill(SIGINT) (FOUND-01, FOUND-03)
 - [ ] 01-03-PLAN.md — Structlog migration: JSON logging, remove print() (FOUND-05)
 - [ ] 01-04-PLAN.md — Test suite: pytest coverage for config, auth, signals, restart (FOUND-04)
 **UI hint**: no
@@ -40,7 +40,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Production Hardening | 0/4 | Planned | - |
+| 1. Production Hardening | 2/4 | In Progress | - |
 
 ---
 *Roadmap created: 2026-05-30*
