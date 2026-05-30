@@ -570,20 +570,7 @@ class ResilientMCPProxy:
                 # Add health check endpoint
                 @self.proxy.custom_route("/health", methods=["GET"])
                 async def health_check(request):
-                    # If CF-Ray header present, request came through Cloudflare (external)
-                    # If no CF-Ray, assume local/Docker request (internal)
-                    cf_ray = request.headers.get("CF-Ray")
-
-                    response = {
-                        "status": "healthy",
-                        "service": "mcp-proxy"
-                    }
-
-                    # Only include server list if NOT from Cloudflare (local/internal requests)
-                    if not cf_ray:
-                        response["servers"] = list(mcp_servers.keys())
-
-                    return JSONResponse(response)
+                    return JSONResponse({"status": "healthy", "service": "mcp-proxy"})
 
                 server_count = len(mcp_servers)
                 server_names = ", ".join(mcp_servers.keys())
