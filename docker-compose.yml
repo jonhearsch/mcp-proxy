@@ -5,28 +5,45 @@ services:
     build: .
     network_mode: "host"
     # Note: When using host networking, ports section is not needed
-    # The service will bind directly to host's 0.0.0.0:8080
+    # The service will bind directly to host's MCP_HOST:8080.
+    #
+    # SECURITY: with host networking and MCP_HOST=0.0.0.0, the proxy is
+    # reachable from the whole network. If an upstream gateway on this same
+    # host is the only intended caller, set MCP_HOST=127.0.0.1 below.
     volumes:
       - ./mcp_config_dev.json:/app/mcp_config.json:ro
     environment:
-      # REQUIRED: Google OAuth credentials
+      # --- Authentication (pick ONE mode; see .env.example for details) ------
+      # Mode 2: shared static token for gateway-fronted deployments.
+      # Generate with: openssl rand -hex 32
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
+
+      # Mode 1: disable auth entirely (local debugging ONLY)
+      - MCP_DISABLE_AUTH=${MCP_DISABLE_AUTH:-false}
+
+      # Mode 3: Google OAuth credentials (required unless a mode above is set)
       # Get from: https://console.developers.google.com/
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - MCP_BASE_URL=${MCP_BASE_URL:-http://localhost:8080}
 
       # Optional: JWT signing key for production (generate with: openssl rand -hex 32)
-      - GOOGLE_JWT_KEY=${GOOGLE_JWT_KEY}
+      - GOOGLE_JWT_KEY=${GOOGLE_JWT_KEY:-}
 
       # MCP Proxy Configuration
       - MCP_CONFIG_PATH=/app/mcp_config.json
-      - MCP_HOST=0.0.0.0
+      - MCP_HOST=${MCP_HOST:-0.0.0.0}
       - MCP_PORT=8080
 
       # Resilience settings
       - MCP_LIVE_RELOAD=false
       - MCP_MAX_RETRIES=3
       - MCP_RESTART_DELAY=5
+
+      # Logging
+      - MCP_LOG_LEVEL=${MCP_LOG_LEVEL:-INFO}
+      - MCP_LOG_LEVELS=${MCP_LOG_LEVELS:-}
+      - MCP_AUTH_DEBUG=${MCP_AUTH_DEBUG:-false}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]

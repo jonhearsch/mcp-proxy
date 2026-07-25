@@ -22,6 +22,34 @@ def _parse_int_env(name: str, default: int) -> int:
         return default
 
 
+_TRUTHY_VALUES = ("true", "1", "yes")
+_FALSY_VALUES = ("false", "0", "no", "")
+
+
+def _parse_bool_env(name: str, default: bool = False) -> bool:
+    """
+    Parse a boolean environment variable.
+
+    Accepts "true"/"1"/"yes" as True and "false"/"0"/"no"/"" as False
+    (case-insensitive). Unrecognized values log a warning and fall back
+    to the default rather than being silently treated as False.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    val = raw.strip().lower()
+    if val in _TRUTHY_VALUES:
+        return True
+    if val in _FALSY_VALUES:
+        return False
+
+    logging.getLogger(__name__).warning(
+        f"Invalid value for {name}='{raw}', using default {default}"
+    )
+    return default
+
+
 def load_config_with_retry(
     config_path: str, max_retries: int, logger: logging.Logger
 ) -> tuple[bool, Optional[dict]]:

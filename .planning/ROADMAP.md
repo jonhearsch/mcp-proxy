@@ -43,4 +43,12 @@ Plans:
 | 1. Production Hardening | 2/4 | In Progress | - |
 
 ---
+
+## Out-of-Roadmap Work
+
+Work completed outside the FOUND-01..05 requirement set, landed alongside Phase 1:
+
+- **2026-07-25** — Static shared-token auth mode (`MCP_AUTH_TOKEN`) for deployments behind a gateway (e.g. agentgateway) that terminates OAuth itself. See STATE.md Phase History and `docs/AUTH_PROVIDERS.md`.
+
+---
 *Roadmap created: 2026-05-30*

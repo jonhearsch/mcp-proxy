@@ -140,9 +140,9 @@ proxy = FastMCP.as_proxy(config, auth=auth, name="mcp-proxy")
 - ✅ **Scope Validation** - Ensures required scopes are granted
 - ✅ **HTTPS Enforcement** - Validates proper OAuth security (except localhost)
 
-### Implementation in proxy_server.py
+### Implementation in mcp_proxy/auth.py
 
-The `create_google_auth()` function in [proxy_server.py](../proxy_server.py):
+The `create_google_auth()` function in [mcp_proxy/auth.py](../mcp_proxy/auth.py):
 
 ```python
 def create_google_auth() -> Optional[GoogleProvider]:
@@ -166,6 +166,73 @@ def create_google_auth() -> Optional[GoogleProvider]:
         jwt_signing_key=jwt_key if jwt_key else None,
     )
 ```
+
+---
+
+## Static Token Authentication (Gateway-Fronted)
+
+Google OAuth is the right choice when an MCP client connects **directly** to this proxy. When the proxy sits **behind a gateway** that terminates OAuth itself, the proxy never participates in an OAuth flow — it only needs to verify that the caller is the gateway. For that, use a shared static token.
+
+```
+Claude.ai  ──OAuth──▶  agentgateway  ──Bearer <MCP_AUTH_TOKEN>──▶  mcp-proxy
+```
+
+### Configuration
+
+```bash
+# Generate a strong token
+openssl rand -hex 32
+
+# Set it in .env
+MCP_AUTH_TOKEN=<generated-token>
+```
+
+Configure the gateway to **set** (not forward) this header on upstream requests:
+
+```
+Authorization: Bearer <MCP_AUTH_TOKEN>
+```
+
+### Implementation in mcp_proxy/auth.py
+
+`create_static_token_auth()` uses FastMCP's built-in `StaticTokenVerifier`, so no custom middleware is involved — it is passed to the same `auth=` parameter as `GoogleProvider`:
+
+```python
+from fastmcp.server.auth import StaticTokenVerifier
+
+auth = StaticTokenVerifier(
+    tokens={token: {"client_id": "agentgateway", "scopes": []}}
+)
+```
+
+The function returns `None` (and the server refuses to start) if the token is shorter than 32 characters, so a placeholder value cannot reach a deployed instance. The token is never written to logs — only its length.
+
+### Security Properties
+
+| Property | Google OAuth | Static Token |
+| -------- | ------------ | ------------ |
+| Per-user identity | ✅ | ❌ (single `client_id`) |
+| Token expiry | ✅ | ❌ |
+| Rotation | ✅ | ❌ (manual) |
+| Constant-time comparison | ✅ | ❌ (plain dict lookup) |
+| Works with direct Claude.ai | ✅ | ❌ |
+
+`StaticTokenVerifier.verify_token()` performs a plain dictionary lookup rather than a constant-time comparison. Across a LAN behind a gateway this is not a practical concern, but it is worth knowing when deciding where to deploy this mode.
+
+FastMCP's own docstring advises against `StaticTokenVerifier` in production. That warning targets multi-tenant deployments storing many users' tokens in plaintext; a single machine-to-machine credential shared between two services you control is the "API key-style authentication" case the same docstring describes. Use it accordingly.
+
+### Not a Substitute for Network Scoping
+
+The token stops casual access; the network boundary is what actually keeps untrusted traffic out. Apply both:
+
+- Set `MCP_HOST=127.0.0.1` when the gateway runs on the same host.
+- In Docker, put the proxy on a shared network with the gateway rather than publishing the port. Note `docker-compose.yml` uses `network_mode: "host"`, which binds directly to the host interface.
+
+### Troubleshooting
+
+**Every request returns 401 through the gateway.** The most likely cause is that the gateway is *forwarding* the client's `Authorization` header instead of *setting* a fixed one — the client's token overwrites the static token. Check the gateway's upstream header policy. If it cannot set a fixed `Authorization` header, a custom header such as `X-Proxy-Key` would require an ASGI shim, as `StaticTokenVerifier` only reads `Authorization`.
+
+**Server exits at startup with "MCP_AUTH_TOKEN is too short".** The token is under 32 characters. Regenerate with `openssl rand -hex 32`.
 
 ---
 
@@ -217,7 +284,7 @@ curl http://localhost:8080/health
 docker logs mcp-proxy
 
 # If running locally
-python proxy_server.py
+python -m mcp_proxy
 
 # Look for:
 # ✓ GoogleProvider successfully initialized
@@ -314,7 +381,7 @@ export MCP_LOG_LEVEL=DEBUG
 export MCP_LOG_LEVELS="fastmcp:DEBUG,httpx:DEBUG"
 
 # Start proxy
-python proxy_server.py
+python -m mcp_proxy
 ```
 
 This shows:

@@ -1,7 +1,8 @@
 """
 MCP Proxy Server — main server module.
 
-Contains setup_logging(), ResilientMCPProxy, and main() entry point.
+Contains ResilientMCPProxy and main() entry point.
+Logging is configured via mcp_proxy.logging.configure_logging().
 """
 
 import os
@@ -9,7 +10,6 @@ import sys
 import json
 import signal
 import time
-import logging
 import threading
 import socket
 import re
@@ -50,74 +50,18 @@ except ImportError:
 from fastmcp import FastMCP
 from starlette.responses import JSONResponse
 
-from mcp_proxy.config import load_config_with_retry, _parse_int_env
-from mcp_proxy.auth import create_google_auth
+from mcp_proxy.config import load_config_with_retry, _parse_int_env, _parse_bool_env
+from mcp_proxy.auth import create_google_auth, create_static_token_auth
 from mcp_proxy.watcher import ConfigFileHandler
-
-
-def setup_logging():
-    """
-    Configure structured logging with support for different log levels per logger.
-
-    Environment Variables:
-        MCP_LOG_LEVEL: Global log level (default: INFO)
-                       Values: DEBUG, INFO, WARNING, ERROR, CRITICAL
-        MCP_LOG_LEVELS: Comma-separated logger-specific levels (default: none)
-                        Format: "logger1:DEBUG,logger2:WARNING,httpx:DEBUG"
-
-    Examples:
-        MCP_LOG_LEVEL=DEBUG - Enable debug logging globally
-        MCP_LOG_LEVELS="fastmcp:DEBUG,httpx:DEBUG" - Debug only fastmcp and httpx
-        MCP_LOG_LEVEL=INFO MCP_LOG_LEVELS="fastmcp:DEBUG" - Info globally, debug for fastmcp
-    """
-    log_format = '%(asctime)s - %(name)-15s - %(levelname)s - %(message)s'
-    formatter = logging.Formatter(log_format)
-
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setFormatter(formatter)
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setFormatter(formatter)
-
-    global_level_str = os.getenv("MCP_LOG_LEVEL", "INFO").upper()
-    try:
-        global_level = getattr(logging, global_level_str)
-    except AttributeError:
-        global_level = logging.INFO
-        print(f"WARNING: Invalid MCP_LOG_LEVEL '{global_level_str}', using INFO", file=sys.stderr)
-
-    root_logger = logging.getLogger()
-    stdout_handler.addFilter(lambda r: r.levelno < logging.WARNING)
-    stderr_handler.setLevel(logging.WARNING)
-    root_logger.setLevel(global_level)
-    root_logger.handlers.clear()
-    root_logger.addHandler(stdout_handler)
-    root_logger.addHandler(stderr_handler)
-
-    logger_levels_str = os.getenv("MCP_LOG_LEVELS", "")
-    if logger_levels_str:
-        for logger_config in logger_levels_str.split(","):
-            logger_config = logger_config.strip()
-            if ":" not in logger_config:
-                continue
-
-            logger_name, level_str = logger_config.split(":", 1)
-            logger_name = logger_name.strip()
-            level_str = level_str.strip().upper()
-
-            try:
-                level = getattr(logging, level_str)
-                logger_obj = logging.getLogger(logger_name)
-                logger_obj.setLevel(level)
-            except AttributeError:
-                print(
-                    f"WARNING: Invalid log level '{level_str}' for logger '{logger_name}'",
-                    file=sys.stderr,
-                )
+from mcp_proxy.logging import configure_logging, get_logger
 
 
 # Run logging setup
-setup_logging()
-logger = logging.getLogger(__name__)
+configure_logging(
+    log_level_str=os.getenv("MCP_LOG_LEVEL", "INFO"),
+    per_logger_str=os.getenv("MCP_LOG_LEVELS", ""),
+)
+logger = get_logger(__name__)
 
 # Log .env loading result (now that logging is configured)
 if _dotenv_available:
@@ -128,12 +72,7 @@ if _dotenv_available:
 else:
     logger.info("python-dotenv not installed - using environment variables directly")
 
-# Configure loggers for common libraries
-logging.getLogger("fastmcp").setLevel(logging.INFO)
-if os.getenv("MCP_AUTH_DEBUG", "").lower() in ("true", "1"):
-    logging.getLogger("fastmcp.auth").setLevel(logging.DEBUG)
-    logging.getLogger("fastmcp.server.auth").setLevel(logging.DEBUG)
-logging.getLogger("httpx").setLevel(logging.INFO)
+# Configure loggers for common libraries (handled in configure_logging, including MCP_AUTH_DEBUG)
 
 
 class ResilientMCPProxy:
@@ -288,19 +227,45 @@ class ResilientMCPProxy:
                 logger.error("No MCP servers configured!")
                 return False
 
-            auth = create_google_auth(logger)
+            # Auth mode selection, in strict precedence order. Exactly one mode
+            # is active and it is always logged.
+            if _parse_bool_env("MCP_DISABLE_AUTH"):
+                # Mode 1: no authentication at all (local debugging only).
+                auth = None
+                logger.warning(
+                    "⚠ Authentication DISABLED (MCP_DISABLE_AUTH set) - do not expose this proxy"
+                )
 
-            if not auth:
-                logger.error("Google OAuth authentication is required but not configured.")
-                logger.error("Set these environment variables:")
-                logger.error("  - GOOGLE_CLIENT_ID: OAuth 2.0 Client ID")
-                logger.error("  - GOOGLE_CLIENT_SECRET: OAuth 2.0 Client Secret")
-                logger.error("  - MCP_BASE_URL: Public URL of this proxy")
-                logger.error("")
-                logger.error("Get credentials from: https://console.developers.google.com/")
-                return False
+            elif os.getenv("MCP_AUTH_TOKEN"):
+                # Mode 2: shared static token, for deployments behind a gateway
+                # that terminates the real OAuth flow.
+                auth = create_static_token_auth(logger)
+                if not auth:
+                    # The token was set but rejected (e.g. too short). Fail here
+                    # rather than falling through to OAuth -- silently switching
+                    # auth modes on a misconfiguration would be a nasty surprise.
+                    logger.error("Static token authentication is configured but invalid.")
+                    return False
+                logger.info("✓ Static token authentication enabled (gateway-fronted mode)")
 
-            logger.info("✓ Google OAuth authentication enabled (Claude.ai compatible)")
+            else:
+                # Mode 3: Google OAuth, for clients connecting directly.
+                auth = create_google_auth(logger)
+                if not auth:
+                    logger.error("Google OAuth authentication is required but not configured.")
+                    logger.error("Set these environment variables:")
+                    logger.error("  - GOOGLE_CLIENT_ID: OAuth 2.0 Client ID")
+                    logger.error("  - GOOGLE_CLIENT_SECRET: OAuth 2.0 Client Secret")
+                    logger.error("  - MCP_BASE_URL: Public URL of this proxy")
+                    logger.error("")
+                    logger.error("Get credentials from: https://console.developers.google.com/")
+                    logger.error("")
+                    logger.error(
+                        "Alternatively, set MCP_AUTH_TOKEN to run behind a gateway "
+                        "that handles OAuth."
+                    )
+                    return False
+                logger.info("✓ Google OAuth authentication enabled (Claude.ai compatible)")
 
             try:
                 proxy_config = {"mcpServers": mcp_servers}
@@ -463,7 +428,7 @@ def main():
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = _parse_int_env("MCP_PORT", 8080)
 
-    enable_live_reload = os.getenv("MCP_LIVE_RELOAD", "false").lower() in ("true", "1", "yes")
+    enable_live_reload = _parse_bool_env("MCP_LIVE_RELOAD", False)
 
     proxy = ResilientMCPProxy(
         config_path=config_path,

@@ -19,13 +19,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Core Components
 
-**proxy_server.py** - Main application with key functions and classes:
+**mcp_proxy/** - Main application package (run with `python -m mcp_proxy`):
+
+**mcp_proxy/auth.py** - Authentication providers:
 
 - `create_google_auth()` - Initializes Google OAuth authentication using FastMCP's native `GoogleProvider`
   - Reads environment variables: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MCP_BASE_URL`, `GOOGLE_JWT_KEY`
   - Creates `GoogleProvider` instance with required OAuth scopes for OpenID and email
   - Returns `None` if credentials not configured, triggering clear error messages
   - Handles JWT signing key for production deployments (optional for development)
+- `create_static_token_auth()` - Shared static token for gateway-fronted deployments
+  - Reads `MCP_AUTH_TOKEN`; returns `None` if unset or shorter than `MIN_TOKEN_LENGTH` (32)
+  - Wraps FastMCP's built-in `StaticTokenVerifier` — no custom middleware
+  - Never logs the token value, only its length
+
+**mcp_proxy/config.py** - `load_config_with_retry()`, plus `_parse_int_env()` / `_parse_bool_env()` env helpers. Use these rather than parsing env vars inline.
+
+**mcp_proxy/logging.py** - structlog configuration (`configure_logging()`, `get_logger()`). See [LOGGING.md](LOGGING.md).
+
+**mcp_proxy/watcher.py** - `ConfigFileHandler`, the watchdog-based config file monitor.
+
+**mcp_proxy/server.py** - Server orchestration:
+
 - `ResilientMCPProxy` - Orchestrates server lifecycle with:
   - Automatic restart on crashes with exponential backoff (max 10 attempts)
   - Live config reloading via file watching
@@ -64,16 +79,26 @@ MCP_PORT=8080
 MCP_LIVE_RELOAD=true
 ```
 
-**Note**: All authentication is handled via Google OAuth. Access control happens at the Google account level - any user with a Google account who completes the OAuth flow can access the proxy.
+**Note**: In Google OAuth mode, access control happens at the Google account level - any user with a Google account who completes the OAuth flow can access the proxy.
+
+### Authentication Modes
+
+Three modes, resolved in strict precedence order in `create_proxy()`. Exactly one is active, and it is logged at startup:
+
+1. `MCP_DISABLE_AUTH` truthy → `auth=None`, logs a warning. Local debugging only.
+2. `MCP_AUTH_TOKEN` set → `StaticTokenVerifier` via `create_static_token_auth()`. For deployments behind a gateway (e.g. agentgateway) that terminates OAuth itself. An invalid token (too short) is a **hard failure** — it deliberately does not fall through to OAuth, since silently switching auth modes on a misconfiguration would be a security surprise.
+3. Otherwise → `create_google_auth()`. Required for clients like Claude.ai that connect directly and need OAuth/DCR.
+
+See [docs/AUTH_PROVIDERS.md](docs/AUTH_PROVIDERS.md) for the trade-offs of static token mode.
 
 ### Server Lifecycle
 
 1. **Startup** - `ResilientMCPProxy.run_with_restart()` orchestration loop starts
-2. **Auth Setup** - `create_google_auth()` initializes Google OAuth authentication
-   - Validates required environment variables: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MCP_BASE_URL`
-   - Creates `GoogleProvider` instance with OpenID and email scopes
+2. **Auth Setup** - `create_proxy()` selects one of the three auth modes above
+   - Google mode validates `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MCP_BASE_URL`
+   - Static token mode validates `MCP_AUTH_TOKEN` length (min 32 chars)
    - Logs configuration details (redacted for security)
-   - Returns `None` if not configured, causing startup failure with clear instructions
+   - Returns `False` if the selected mode is misconfigured, causing startup failure with clear instructions
 3. **Config Load** - Configuration loaded with retry logic (`load_config_with_retry()`)
    - Validates JSON schema against `mcp_config.schema.json`
    - Expands environment variables in config
@@ -127,10 +152,10 @@ cat > data/users.json << 'EOF'
 EOF
 
 # Run with OAuth enabled
-python proxy_server.py
+python -m mcp_proxy
 
 # Run with live reload enabled
-MCP_LIVE_RELOAD=true python proxy_server.py
+MCP_LIVE_RELOAD=true python -m mcp_proxy
 ```
 
 ### Docker Development
@@ -173,17 +198,16 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
 
 ## Environment Variables
 
-### OAuth Configuration (Required for Authentication)
+### Authentication (one mode required)
 
-- `MCP_AUTH_PROVIDER` - Enable OAuth: set to `oauth_proxy` to enable Auth0
-- `AUTH0_CLIENT_ID` - Auth0 application client ID (from Dashboard → Applications → Your App)
-- `AUTH0_CLIENT_SECRET` - Auth0 application client secret
-- `AUTH0_DOMAIN` - Auth0 tenant domain (e.g., `your-tenant.us.auth0.com`)
-- `AUTH0_AUDIENCE` - Auth0 API identifier (Audience) - must match configured API
+- `MCP_AUTH_TOKEN` - Shared static token for gateway-fronted deployments (auth mode 2)
+  - Generate with: `openssl rand -hex 32`
+  - Minimum 32 characters; shorter values are rejected at startup
+  - The upstream gateway must **set** `Authorization: Bearer <token>`, not forward the client's header
+- `MCP_DISABLE_AUTH` - Disable authentication entirely: `true|1|yes` (default: false)
+  - Local debugging only; leaves the proxy open to anything that can reach the port
 
-### MCP Proxy Configuration
-
-### Google OAuth (Required)
+### Google OAuth (auth mode 3 - required unless a mode above is set)
 
 - `GOOGLE_CLIENT_ID` - OAuth 2.0 Client ID from Google Cloud Console
   - Format: `123456789-abc123def456.apps.googleusercontent.com`
@@ -204,6 +228,7 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
 
 - `MCP_CONFIG_PATH` - Path to MCP servers config (default: `mcp_config.json`)
 - `MCP_HOST` - Bind host address (default: `0.0.0.0`)
+  - Set to `127.0.0.1` when a gateway on the same host is the only intended caller
 - `MCP_PORT` - Bind port (default: `8080`)
 - `MCP_LIVE_RELOAD` - Enable live config reload: `true|1|yes` (default: false)
 
@@ -211,6 +236,12 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
 
 - `MCP_MAX_RETRIES` - Config load retry attempts (default: 3)
 - `MCP_RESTART_DELAY` - Initial restart delay in seconds (default: 5)
+
+### Logging
+
+- `MCP_LOG_LEVEL` - Global log level (default: `INFO`)
+- `MCP_LOG_LEVELS` - Per-logger overrides, format `name:LEVEL,name:LEVEL`
+- `MCP_AUTH_DEBUG` - Verbose auth logging: `true|1|yes` (default: false)
 
 ## Google OAuth 2.0 Authentication
 

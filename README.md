@@ -389,13 +389,61 @@ sudo certbot --nginx -d mcp.your-domain.com
 
 ## Configuration
 
+### Authentication Modes
+
+The proxy supports three authentication modes, resolved in this **precedence order**. Exactly one is active, and it is logged at startup.
+
+| # | Trigger | Mode | Use when |
+| - | ------- | ---- | -------- |
+| 1 | `MCP_DISABLE_AUTH=true` | No authentication | Local debugging only |
+| 2 | `MCP_AUTH_TOKEN` is set | Shared static token | Running behind a gateway that handles OAuth |
+| 3 | *(default)* | Google OAuth | Claude.ai (or another MCP client) connects **directly** |
+
+#### Mode 3: Google OAuth (direct connections)
+
+The default. Claude.ai performs OAuth discovery and Dynamic Client Registration against this proxy, users sign in with Google, and each request carries a per-user identity. Requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `MCP_BASE_URL`.
+
+#### Mode 2: Static shared token (gateway-fronted)
+
+For topologies where an upstream gateway — for example [agentgateway](https://github.com/agentgateway/agentgateway) — terminates the real OAuth flow and forwards requests to this proxy:
+
+```
+Claude.ai  ──OAuth──▶  agentgateway  ──Bearer <MCP_AUTH_TOKEN>──▶  mcp-proxy
+```
+
+The client never talks to the proxy directly, so the proxy has no OAuth flow to participate in — it only needs to confirm the caller is the gateway. Configure the gateway to **set** a fixed upstream header:
+
+```
+Authorization: Bearer <MCP_AUTH_TOKEN>
+```
+
+Generate the token with:
+
+```bash
+openssl rand -hex 32
+```
+
+Tokens shorter than 32 characters are rejected at startup.
+
+> **Limitations.** A static token has no expiry, no rotation, and no per-user identity — every request is logged as the same client, so the user-identity tracking available in Google OAuth mode does not apply. It is suitable for a machine-to-machine credential between two services you control, not for multi-user access.
+
+> **This is not a substitute for network scoping.** The token stops casual access; the network boundary is what keeps the internet out. If the gateway runs on the same host, set `MCP_HOST=127.0.0.1` so the proxy is not reachable from the rest of your network. In Docker, prefer a shared network with the gateway over publishing the port.
+
+**Known integration risk:** if your gateway *forwards* the client's `Authorization` header rather than *setting* a fixed one, the client's token overwrites the static token and every request returns 401. Verify with an end-to-end tool call after configuring.
+
+#### Mode 1: Disable authentication
+
+`MCP_DISABLE_AUTH=true` leaves the proxy completely open to anything that can reach the port. Intended for local debugging on a loopback bind. Never enable it on a host reachable from an untrusted network.
+
 ### Environment Variables
 
 | Variable               | Required | Description                                   | Default           |
 | ---------------------- | -------- | --------------------------------------------- | ----------------- |
-| `GOOGLE_CLIENT_ID`     | ✅       | OAuth 2.0 Client ID from Google Cloud Console | -                 |
-| `GOOGLE_CLIENT_SECRET` | ✅       | OAuth 2.0 Client Secret                       | -                 |
-| `MCP_BASE_URL`         | ✅       | Public URL for OAuth callbacks                | -                 |
+| `MCP_AUTH_TOKEN`       | ⚠️       | Shared static token (auth mode 2). Min 32 chars | -               |
+| `MCP_DISABLE_AUTH`     | ❌       | Disable authentication entirely (mode 1)      | `false`           |
+| `GOOGLE_CLIENT_ID`     | ⚠️       | OAuth 2.0 Client ID (required for mode 3)     | -                 |
+| `GOOGLE_CLIENT_SECRET` | ⚠️       | OAuth 2.0 Client Secret (required for mode 3) | -                 |
+| `MCP_BASE_URL`         | ⚠️       | Public URL for OAuth callbacks (mode 3)       | -                 |
 | `GOOGLE_JWT_KEY`       | ⚠️       | JWT signing key (recommended for production)  | auto-generated    |
 | `MCP_CONFIG_PATH`      | ❌       | Path to MCP servers config                    | `mcp_config.json` |
 | `MCP_HOST`             | ❌       | Server bind address                           | `0.0.0.0`         |
@@ -404,6 +452,10 @@ sudo certbot --nginx -d mcp.your-domain.com
 | `MCP_MAX_RETRIES`      | ❌       | Config load retry attempts                    | `3`               |
 | `MCP_RESTART_DELAY`    | ❌       | Initial restart delay (seconds)               | `5`               |
 | `MCP_LOG_LEVEL`        | ❌       | Global log level                              | `INFO`            |
+| `MCP_LOG_LEVELS`       | ❌       | Per-logger levels (`name:LEVEL,...`)          | -                 |
+| `MCP_AUTH_DEBUG`       | ❌       | Verbose auth logging                          | `false`           |
+
+⚠️ = required for a specific auth mode; see [Authentication Modes](#authentication-modes) above.
 
 ### MCP Server Configuration
 
@@ -666,16 +718,20 @@ docker run -p 8080:8080 \
 
 ### Why Google OAuth instead of API keys?
 
-Claude.ai requires OAuth with Dynamic Client Registration (DCR). Google OAuth provides:
+When Claude.ai connects **directly** to this proxy, OAuth is not optional — Claude.ai's MCP connector performs OAuth discovery and Dynamic Client Registration (DCR), and has no field for pasting a static key. Google OAuth also provides:
 
 - Trusted authentication via Google accounts
 - No manual API key management
 - Built-in user identity tracking
 - Compatible with Claude.ai's security requirements
 
+If instead you run the proxy **behind a gateway** that terminates OAuth itself, the proxy never sees the client's OAuth flow and a shared static token is appropriate — see [Authentication Modes](#authentication-modes).
+
 ### Can I use a different OAuth provider?
 
-The current version is optimized for Google OAuth for Claude.ai compatibility. For other providers, check out the git history for previous OAuth implementations or contribute a provider!
+Not directly — the built-in provider is Google, optimized for Claude.ai compatibility. For other providers, check out the git history for previous OAuth implementations or contribute a provider!
+
+A common alternative is to put a gateway in front of the proxy: the gateway handles whatever identity provider you like, and the proxy authenticates the gateway with `MCP_AUTH_TOKEN` (auth mode 2).
 
 ### What MCP servers are supported?
 
