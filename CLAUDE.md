@@ -63,6 +63,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 }
 ```
 
+String values anywhere in the config may reference `${VAR_NAME}` to pull from the process environment (e.g. for API keys in `args`/`env`). Expansion happens in `load_config_with_retry()` before schema validation; a referenced variable that isn't set is a permanent config error (fails startup immediately, naming the missing variable, no retry).
+
 **.env** - Environment configuration (required):
 
 ```bash
@@ -121,9 +123,16 @@ See [docs/AUTH_PROVIDERS.md](docs/AUTH_PROVIDERS.md) for the trade-offs of stati
 
 - Uses watchdog library to monitor the config file's parent directory
 - Debounces events (1 second delay) to handle multiple rapid filesystem events
-- Reload triggers `os._exit(42)` to ensure clean port release
-- Exit code 42 distinguishes intentional reload from crashes
-- `_monitor_for_reload()` runs in daemon thread checking for reload flag
+- `_monitor_for_reload()` runs in a daemon thread; on a debounced change it sets
+  `restart_event` and sends the process its own `SIGTERM` to unblock the
+  in-progress `proxy.run()` call
+- `_handle_signal()` (the shared SIGINT/SIGTERM handler) checks `restart_event`
+  first: if set, it's this internal reload self-signal, not a real shutdown
+  request, so it returns without touching `shutdown_event`. Only an external
+  signal (Ctrl+C, Docker/K8s stop) sets `shutdown_event`
+- `run_with_restart()` sees `restart_event` set once `proxy.run()` returns,
+  waits for the port to free up, and loops back to rebuild the proxy with the
+  freshly reloaded config — all within the same process
 
 ## Development Commands
 
@@ -223,6 +232,7 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/mcp
   - Generate with: `openssl rand -hex 32`
   - If not set, FastMCP uses a default key (suitable for development only)
   - Recommended for production to ensure token security across restarts
+  - Known upstream risk: see [docs/AUTH_PROVIDERS.md](docs/AUTH_PROVIDERS.md#environment-variables) — an open fastmcp issue reports this key can be silently ignored; smoke-test before relying on it
 
 ### MCP Proxy Configuration
 

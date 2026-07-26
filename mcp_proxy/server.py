@@ -158,13 +158,26 @@ class ResilientMCPProxy:
         Handles SIGTERM (container stop) and SIGINT (Ctrl+C) to ensure
         the server shuts down cleanly and releases resources.
         """
-        def signal_handler(signum, _frame):
-            signal_name = signal.Signals(signum).name
-            logger.info(f"Received {signal_name}, initiating graceful shutdown...")
-            self.shutdown_event.set()
+        signal.signal(signal.SIGINT, self._handle_signal)   # Ctrl+C
+        signal.signal(signal.SIGTERM, self._handle_signal)  # Docker stop
 
-        signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-        signal.signal(signal.SIGTERM, signal_handler)  # Docker stop
+    def _handle_signal(self, signum, _frame):
+        """
+        Shared SIGINT/SIGTERM handler.
+
+        _monitor_for_reload() also sends the process SIGTERM to unblock the
+        in-progress proxy.run() call for a live reload. It sets restart_event
+        before doing so, which lets us tell that self-inflicted signal apart
+        from a real external shutdown request (Ctrl+C, Docker/K8s stop) --
+        otherwise every reload would set shutdown_event and terminate the
+        server instead of restarting it.
+        """
+        signal_name = signal.Signals(signum).name
+        if self.restart_event.is_set():
+            logger.info(f"Received {signal_name} for internal reload, not a shutdown")
+            return
+        logger.info(f"Received {signal_name}, initiating graceful shutdown...")
+        self.shutdown_event.set()
 
     def setup_file_watcher(self):
         """
@@ -296,23 +309,6 @@ class ResilientMCPProxy:
             logger.error(f"Failed to create proxy: {e}", exc_info=True)
             return False
 
-    def run_server(self):
-        """Run FastMCP server using native HTTP transport."""
-        try:
-            logger.info(f"Starting unified FastMCP proxy on {self.host}:{self.port}")
-            logger.info(f"  Endpoint: / (root)")
-            self.proxy.run(
-                transport="http",
-                host=self.host,
-                port=self.port
-            )
-        except KeyboardInterrupt:
-            logger.info("Received keyboard interrupt")
-            self.shutdown_event.set()
-        except Exception as e:
-            logger.error(f"Server error: {e}", exc_info=True)
-            raise
-
     def run_server_with_reload(self):
         """Run FastMCP server with reload support - triggers process exit on config change"""
         try:
@@ -344,6 +340,11 @@ class ResilientMCPProxy:
                 os.kill(os.getpid(), signal.SIGTERM)
                 break
 
+    def _sleep_backoff(self, current_delay: float) -> float:
+        """Sleep for current_delay seconds and return the escalated delay (capped at 30s)."""
+        time.sleep(current_delay)
+        return min(current_delay * 1.5, 30)
+
     def run_with_restart(self):
         """
         Main server loop with automatic restart and error recovery.
@@ -356,6 +357,10 @@ class ResilientMCPProxy:
         logger.info("Starting resilient MCP proxy...")
 
         restart_count = 0
+        # self.restart_delay is the configured *initial* delay and is never
+        # mutated -- current_delay is the escalating backoff for this
+        # crash/retry streak, reset to the initial value after any clean run.
+        current_delay = self.restart_delay
 
         while not self.shutdown_event.is_set():
             self.restart_event.clear()
@@ -378,6 +383,7 @@ class ResilientMCPProxy:
                 if restart_count > 0:
                     logger.info(f"Successfully restarted after {restart_count} attempts")
                 restart_count = 0
+                current_delay = self.restart_delay
 
                 self.run_server_with_reload()
 
@@ -386,8 +392,19 @@ class ResilientMCPProxy:
                 if self.restart_event.is_set():
                     logger.info("Graceful reload requested, restarting with new configuration...")
                     if not self.wait_for_port_available():
-                        logger.error("Port did not become available, skipping reload")
-                        break
+                        restart_count += 1
+                        logger.error(
+                            f"Port did not become available after reload "
+                            f"(attempt #{restart_count})"
+                        )
+                        if self.shutdown_event.is_set():
+                            logger.info("Shutdown requested, not retrying")
+                            break
+                        if restart_count >= 10:
+                            logger.error("Too many restart attempts, giving up")
+                            break
+                        logger.info(f"Retrying reload in {current_delay} seconds...")
+                        current_delay = self._sleep_backoff(current_delay)
                     continue
                 else:
                     break
@@ -401,9 +418,8 @@ class ResilientMCPProxy:
                 if restart_count >= 10:
                     logger.error("Too many restart attempts, giving up")
                     break
-                logger.info(f"Restarting server in {self.restart_delay} seconds...")
-                time.sleep(self.restart_delay)
-                self.restart_delay = min(self.restart_delay * 1.5, 30)
+                logger.info(f"Restarting server in {current_delay} seconds...")
+                current_delay = self._sleep_backoff(current_delay)
 
         logger.info("Proxy server shutdown complete")
         self.stop_file_watcher()

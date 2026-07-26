@@ -105,6 +105,7 @@ MCP_LIVE_RELOAD=true
 - ⚠️ **Keep Client Secret private** - Treat like a password
 - ⚠️ **Use HTTPS in production** - OAuth requires HTTPS (except localhost)
 - ✅ **Generate JWT key for production** - Ensures token security across restarts
+- ⚠️ **Known upstream risk**: [PrefectHQ/fastmcp#2867](https://github.com/PrefectHQ/fastmcp/issues/2867) reports that `GoogleProvider`'s `jwt_signing_key` can be silently ignored in favor of an internal ephemeral key, which would mean sessions don't actually survive a restart even with `GOOGLE_JWT_KEY` set. It was filed against an older fastmcp release; we haven't confirmed whether it reproduces on the version pinned in `requirements.txt`. Before relying on this in production, do a manual smoke test: obtain a client token, restart the proxy, and confirm the existing token is still accepted rather than forcing re-auth.
 
 ---
 

@@ -2,12 +2,46 @@
 
 import os
 import json
+import re
 import time
 import logging
 from pathlib import Path
 from typing import Optional
 
 import jsonschema
+
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+class ConfigEnvVarError(Exception):
+    """A config value references an environment variable that isn't set."""
+
+    def __init__(self, var_name: str):
+        self.var_name = var_name
+        super().__init__(f"Environment variable '{var_name}' referenced in config is not set")
+
+
+def _expand_env_vars(obj):
+    """
+    Recursively substitute ${VAR_NAME} references in string values from
+    os.environ. Raises ConfigEnvVarError if a referenced variable is unset --
+    silently leaving the literal placeholder in place (e.g. in a server's
+    args/env) would be a worse failure mode than a loud startup error.
+    """
+    if isinstance(obj, dict):
+        return {key: _expand_env_vars(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_expand_env_vars(item) for item in obj]
+    if isinstance(obj, str):
+        def _replace(match: "re.Match[str]") -> str:
+            var_name = match.group(1)
+            if var_name not in os.environ:
+                raise ConfigEnvVarError(var_name)
+            return os.environ[var_name]
+
+        return _ENV_VAR_PATTERN.sub(_replace, obj)
+    return obj
 
 
 def _parse_int_env(name: str, default: int) -> int:
@@ -93,6 +127,8 @@ def load_config_with_retry(
                 config = json.load(f)
             logger.info(f"✓ Loaded config file from {abs_config_path}")
 
+            config = _expand_env_vars(config)
+
             jsonschema.validate(instance=config, schema=schema)
 
             server_count = len(config["mcpServers"])
@@ -106,6 +142,9 @@ def load_config_with_retry(
             return False, None
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in config file: {e}")
+            return False, None
+        except ConfigEnvVarError as e:
+            logger.error(f"Config load failed: {e}")
             return False, None
         except jsonschema.ValidationError as e:
             logger.error(f"Config schema validation failed: {e.message}")

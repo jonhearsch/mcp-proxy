@@ -1,11 +1,14 @@
 FROM python:3.11-slim
 
-# Install dependencies
+# Install system dependencies, then Node.js via NodeSource pinned to a
+# current LTS -- Debian's default apt package tracks whatever shipped with
+# the base image and can land on an EOL Node release after a rebuild.
 RUN apt-get update && apt-get install -y \
-    nodejs \
-    npm \
     curl \
     ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Create user first
