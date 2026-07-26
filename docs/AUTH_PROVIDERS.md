@@ -352,7 +352,7 @@ MCP_BASE_URL=https://your-domain.com
 
 **Solution:**
 
-1. Update FastMCP: `pip install 'fastmcp[auth]>=2.13.0'`
+1. Update FastMCP: `pip install 'fastmcp>=3.4.4'`
 2. Verify `from fastmcp.server.auth.providers.google import GoogleProvider` works
 3. Check logs for specific error details
 
