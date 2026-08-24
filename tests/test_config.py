@@ -8,6 +8,7 @@ import pytest
 from mcp_proxy.config import (
     ConfigEnvVarError,
     _expand_env_vars,
+    _normalize_header_keys,
     _parse_bool_env,
     _parse_int_env,
     load_config_with_retry,
@@ -83,6 +84,36 @@ def test_expand_env_vars_missing_var_raises(monkeypatch):
         _expand_env_vars({"env": {"KEY": "${TEST_MISSING_VAR}"}})
 
 
+# --- _normalize_header_keys ------------------------------------------------
+
+
+def test_normalize_header_keys_lowercases_authorization():
+    config = {
+        "mcpServers": {"context7": {"headers": {"Authorization": "Bearer ctx7sk-x"}}}
+    }
+    result = _normalize_header_keys(config)
+    assert result["mcpServers"]["context7"]["headers"] == {
+        "authorization": "Bearer ctx7sk-x"
+    }
+
+
+def test_normalize_header_keys_leaves_servers_without_headers_untouched():
+    config = {"mcpServers": {"srv": {"command": "npx", "args": ["pkg"]}}}
+    assert _normalize_header_keys(config) == config
+
+
+def test_normalize_header_keys_handles_multiple_servers():
+    config = {
+        "mcpServers": {
+            "a": {"headers": {"X-Api-Key": "a-key"}},
+            "b": {"headers": {"Authorization": "Bearer b-key"}},
+        }
+    }
+    result = _normalize_header_keys(config)
+    assert result["mcpServers"]["a"]["headers"] == {"x-api-key": "a-key"}
+    assert result["mcpServers"]["b"]["headers"] == {"authorization": "Bearer b-key"}
+
+
 # --- load_config_with_retry -----------------------------------------------
 
 
@@ -126,6 +157,26 @@ def test_load_config_expands_env_vars(tmp_path, logger, monkeypatch):
     success, config = load_config_with_retry(config_path, max_retries=3, logger=logger)
     assert success is True
     assert config["mcpServers"]["test"]["args"] == ["--key=secret123"]
+
+
+def test_load_config_normalizes_header_keys(tmp_path, logger):
+    config_path = _write_config(
+        tmp_path / "mcp_config.json",
+        {
+            "mcpServers": {
+                "context7": {
+                    "url": "https://mcp.context7.com/mcp",
+                    "transport": "http",
+                    "headers": {"Authorization": "Bearer ctx7sk-x"},
+                }
+            }
+        },
+    )
+    success, config = load_config_with_retry(config_path, max_retries=3, logger=logger)
+    assert success is True
+    assert config["mcpServers"]["context7"]["headers"] == {
+        "authorization": "Bearer ctx7sk-x"
+    }
 
 
 def test_load_config_missing_env_var_fails_without_retry(tmp_path, logger, monkeypatch):

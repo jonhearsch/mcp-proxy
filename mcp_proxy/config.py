@@ -44,6 +44,25 @@ def _expand_env_vars(obj):
     return obj
 
 
+def _normalize_header_keys(config: dict) -> dict:
+    """
+    Lowercase per-server HTTP header keys.
+
+    fastmcp merges inbound client headers (keyed lowercase, e.g. "authorization")
+    with configured per-server headers via a plain dict union. If the configured
+    key differs only in case (e.g. "Authorization"), both survive as separate
+    dict entries and the outbound request ends up with two Authorization header
+    lines -- upstream servers may honor the wrong one (the forwarded inbound
+    header) instead of the configured value. Normalizing to lowercase here makes
+    the union correctly overwrite the inbound header with the configured one.
+    """
+    for server in config.get("mcpServers", {}).values():
+        headers = server.get("headers")
+        if isinstance(headers, dict):
+            server["headers"] = {k.lower(): v for k, v in headers.items()}
+    return config
+
+
 def _parse_int_env(name: str, default: int) -> int:
     """Parse an integer environment variable with a friendly fallback on invalid input."""
     val = os.getenv(name, str(default))
@@ -128,6 +147,7 @@ def load_config_with_retry(
             logger.info(f"✓ Loaded config file from {abs_config_path}")
 
             config = _expand_env_vars(config)
+            config = _normalize_header_keys(config)
 
             jsonschema.validate(instance=config, schema=schema)
 
